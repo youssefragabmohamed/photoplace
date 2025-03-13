@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: photo-marketplace-backend
+    env: node
+    plan: free
+    repo: https://github.com/YOUR_USERNAME/photo-marketplace-backend
+    branch: main
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: MONGODB_URI
+        value: mongodb+srv://YOUR_USERNAME:YOUR_PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority
+      - key: JWT_SECRET
+        sync: false  # Set this manually in Render's dashboard
+
+databases:
+  - name: photo-marketplace-db
+    plan: free
+    region: oregon
