@@ -3,7 +3,7 @@ services:
     name: photo-marketplace-backend
     env: node
     plan: free
-    repo: https://github.com/YOUR_USERNAME/photo-marketplace-backend
+    repo: https://github.com/youssefragabmohamed/photoplace
     branch: main
     buildCommand: npm install
     startCommand: node server.js
