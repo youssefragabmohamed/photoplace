@@ -9,7 +9,7 @@ services:
     startCommand: node server.js
     envVars:
       - key: MONGODB_URI
-        value:mongodb+srv://youssefragab:YOUSSEFRAGAB@photoplace.gtmxi.mongodb.net/?retryWrites=true&w=majority&appName=photoplace
+        value:mongodb+srv://youssefragab:YOUSSEFRAGAB@photoplace.gtmxi.mongodb.net/?retryWrites=true&w=majority&appName=photoplace:
       - key:5435d05e9d9d3da0de7d90fea03754f2
         sync: false  # Set this manually in Render's dashboard
 
