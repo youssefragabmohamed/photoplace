@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: "http://localhost:3000",
+  origin: "https://frontendphotoplace.vercel.app", // Updated frontend URL
   methods: ["GET", "POST", "DELETE", "PUT"],
   credentials: true,
 }));
@@ -178,7 +178,7 @@ app.get("/photos", async (req, res) => {
     const photos = await Photo.find(query);
     const updatedPhotos = photos.map((photo) => ({
       ...photo._doc,
-      url: `http://localhost:5000${photo.url}`,
+      url: `https://photoplace-backend.onrender.com${photo.url}`, // Updated backend URL
     }));
     res.json(updatedPhotos);
   } catch (error) {
@@ -196,7 +196,7 @@ app.get("/photo/:id", async (req, res) => {
     }
     res.json({
       ...photo._doc,
-      url: `http://localhost:5000${photo.url}`,
+      url: `https://photoplace-backend.onrender.com${photo.url}`, // Updated backend URL
     });
   } catch (error) {
     console.error("Error fetching photo:", error);
@@ -241,7 +241,7 @@ app.post("/upload", (req, res, next) => {
           message: "Photo uploaded successfully",
           photo: {
             ...newPhoto._doc,
-            url: `http://localhost:5000${newPhoto.url}`,
+            url: `https://photoplace-backend.onrender.com${newPhoto.url}`, // Updated backend URL
           },
         });
       } catch (error) {
