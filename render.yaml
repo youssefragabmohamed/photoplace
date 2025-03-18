@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: photoplace backend
+    name: photoplace-backend
     env: node
     plan: free
     repo: https://github.com/youssefragabmohamed/photoplace
@@ -9,11 +9,6 @@ services:
     startCommand: node server.js
     envVars:
       - key: MONGODB_URI
-        value:mongodb+srv://youssefragab:YOUSSEFRAGAB@photoplace.gtmxi.mongodb.net/?retryWrites=true&w=majority&appName=photoplace:
-      - key:5435d05e9d9d3da0de7d90fea03754f2
-        sync: false  # Set this manually in Render's dashboard
-
-databases:
-  - name: photo-marketplace-db
-    plan: free
-    region: oregon
+        value: mongodb+srv://youssefragab:YOUSSEFRAGAB@photoplace.gtmxi.mongodb.net/?retryWrites=true&w=majority&appName=photoplace
+      - key: JWT_SECRET
+        value: 5435d05e9d9d3da0de7d90fea03754f2
