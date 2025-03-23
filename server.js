@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const bcrypt = require("bcryptjs"); // Updated to bcryptjs
+const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: "https://frontendphotoplace.vercel.app", // Updated frontend URL
+  origin: "https://frontendphotoplace.vercel.app",
   methods: ["GET", "POST", "DELETE", "PUT"],
   credentials: true,
 }));
@@ -114,7 +114,6 @@ app.post("/api/users/login", async (req, res) => {
       expiresIn: "1h",
     });
 
-    // Return user data along with the token
     res.status(200).json({
       token,
       user: {
@@ -178,7 +177,7 @@ app.get("/api/photos", async (req, res) => {
     const photos = await Photo.find(query);
     const updatedPhotos = photos.map((photo) => ({
       ...photo._doc,
-      url: `https://photoplace-backend-4i8v.onrender.com${photo.url}`, // Updated backend URL
+      url: `https://photoplace-backend-4i8v.onrender.com${photo.url}`,
     }));
     res.json(updatedPhotos);
   } catch (error) {
@@ -196,7 +195,7 @@ app.get("/api/photos/:id", async (req, res) => {
     }
     res.json({
       ...photo._doc,
-      url: `https://photoplace-backend-4i8v.onrender.com${photo.url}`, // Updated backend URL
+      url: `https://photoplace-backend-4i8v.onrender.com${photo.url}`,
     });
   } catch (error) {
     console.error("Error fetching photo:", error);
@@ -241,7 +240,7 @@ app.post("/api/photos/upload", (req, res, next) => {
           message: "Photo uploaded successfully",
           photo: {
             ...newPhoto._doc,
-            url: `https://photoplace-backend-4i8v.onrender.com${newPhoto.url}`, // Updated backend URL
+            url: `https://photoplace-backend-4i8v.onrender.com${newPhoto.url}`,
           },
         });
       } catch (error) {
