@@ -21,7 +21,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
-app.use("/upload", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Handle CORS preflight requests (important for DELETE)
 app.options("*", cors());
@@ -81,7 +81,7 @@ const authMiddleware = (req, res, next) => {
 };
 
 // ✅ **User Signup**
-app.post("/api/signup", async (req, res) => {
+app.post("/api/users/signup", async (req, res) => {
   const { username, email, password } = req.body;
 
   try {
@@ -96,7 +96,7 @@ app.post("/api/signup", async (req, res) => {
 });
 
 // ✅ **User Login**
-app.post("/api/login", async (req, res) => {
+app.post("/api/users/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
@@ -129,7 +129,7 @@ app.post("/api/login", async (req, res) => {
 });
 
 // ✅ **Get User Profile**
-app.get("/profile/:userId", authMiddleware, async (req, res) => {
+app.get("/api/users/:userId/profile", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.userId).select("-password");
     if (!user) {
@@ -143,12 +143,12 @@ app.get("/profile/:userId", authMiddleware, async (req, res) => {
 
 // ✅ **Update User Profile**
 app.put(
-  "/profile/:userId",
+  "/api/users/:userId/profile",
   authMiddleware,
   profilePictureUpload.single("profilePicture"),
   async (req, res) => {
     const { bio } = req.body;
-    const profilePicture = req.file ? `/upload/profile-pictures/${req.file.filename}` : null;
+    const profilePicture = req.file ? `/uploads/profile-pictures/${req.file.filename}` : null;
 
     try {
       const updateData = { bio };
@@ -170,7 +170,7 @@ app.put(
 );
 
 // ✅ **Fetch All Photos (Ensure Full URL)**
-app.get("/photos", async (req, res) => {
+app.get("/api/photos", async (req, res) => {
   const { userId } = req.query;
 
   try {
@@ -178,7 +178,7 @@ app.get("/photos", async (req, res) => {
     const photos = await Photo.find(query);
     const updatedPhotos = photos.map((photo) => ({
       ...photo._doc,
-      url: `https://photoplace-backend.onrender.com${photo.url}`, // Updated backend URL
+      url: `https://photoplace-backend-4i8v.onrender.com${photo.url}`, // Updated backend URL
     }));
     res.json(updatedPhotos);
   } catch (error) {
@@ -188,7 +188,7 @@ app.get("/photos", async (req, res) => {
 });
 
 // ✅ **Fetch Single Photo by ID**
-app.get("/photo/:id", async (req, res) => {
+app.get("/api/photos/:id", async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.id);
     if (!photo) {
@@ -196,7 +196,7 @@ app.get("/photo/:id", async (req, res) => {
     }
     res.json({
       ...photo._doc,
-      url: `https://photoplace-backend.onrender.com${photo.url}`, // Updated backend URL
+      url: `https://photoplace-backend-4i8v.onrender.com${photo.url}`, // Updated backend URL
     });
   } catch (error) {
     console.error("Error fetching photo:", error);
@@ -205,7 +205,7 @@ app.get("/photo/:id", async (req, res) => {
 });
 
 // ✅ **Upload Photos (Ensure Full URL)**
-app.post("/upload", (req, res, next) => {
+app.post("/api/photos/upload", (req, res, next) => {
   // First, parse the non-file fields (title, description, userId)
   parseFormData(req, res, (err) => {
     if (err) {
@@ -230,7 +230,7 @@ app.post("/upload", (req, res, next) => {
       try {
         const newPhoto = new Photo({
           title,
-          url: `/upload/${req.file.filename}`,
+          url: `/uploads/${req.file.filename}`,
           description,
           userId,
         });
@@ -241,7 +241,7 @@ app.post("/upload", (req, res, next) => {
           message: "Photo uploaded successfully",
           photo: {
             ...newPhoto._doc,
-            url: `https://photoplace-backend.onrender.com${newPhoto.url}`, // Updated backend URL
+            url: `https://photoplace-backend-4i8v.onrender.com${newPhoto.url}`, // Updated backend URL
           },
         });
       } catch (error) {
@@ -253,7 +253,7 @@ app.post("/upload", (req, res, next) => {
 });
 
 // ✅ **Delete or Archive Photo**
-app.delete("/photo/:photoId", authMiddleware, async (req, res) => {
+app.delete("/api/photos/:photoId", authMiddleware, async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.photoId);
     if (!photo) {
@@ -271,7 +271,7 @@ app.delete("/photo/:photoId", authMiddleware, async (req, res) => {
 });
 
 // ✅ **Delete Photo**
-app.delete("/delete/:id", async (req, res) => {
+app.delete("/api/photos/:id", async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🔍 Attempting to delete photo with ID: ${id}`);
@@ -281,7 +281,7 @@ app.delete("/delete/:id", async (req, res) => {
       return res.status(404).json({ message: "Photo not found" });
     }
 
-    const filePath = path.join(__dirname, "uploads", photo.url.replace("/upload/", ""));
+    const filePath = path.join(__dirname, "uploads", photo.url.replace("/uploads/", ""));
     console.log(`🗑️ File path to delete: ${filePath}`);
 
     if (fs.existsSync(filePath)) {
