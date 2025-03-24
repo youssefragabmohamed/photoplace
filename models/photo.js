@@ -1,11 +1,37 @@
 const mongoose = require("mongoose");
 
 const photoSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  url: { type: String, required: true },
-  description: { type: String, default: "" },
-}, { timestamps: true }); // Add timestamps to track creation and modification dates
+  title: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 100
+  },
+  url: {
+    type: String,
+    required: true
+  },
+  description: {
+    type: String,
+    maxlength: 500
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  likes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { timestamps: true });
 
-const Photo = mongoose.model("Photo", photoSchema);
+// Indexes for better performance
+photoSchema.index({ userId: 1 });
+photoSchema.index({ createdAt: -1 });
 
-module.exports = Photo;
+module.exports = mongoose.model("Photo", photoSchema);
