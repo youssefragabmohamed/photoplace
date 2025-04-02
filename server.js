@@ -17,365 +17,262 @@ const User = require("./models/user.js");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-/* ======================
-   Database Connection Events
-   ====================== */
+// Enhanced Database Connection Events
 mongoose.connection.on('connected', () => {
-  console.log('✅ MongoDB Atlas Connected to photoplace.gtmxi.mongodb.net');
+  console.log('✅ MongoDB Atlas Connected');
 });
 
 mongoose.connection.on('error', (err) => {
-  console.error('❌ MongoDB Connection Error:', err.message);
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.log('ℹ️ MongoDB Disconnected');
+  console.error('❌ MongoDB Error:', err.message);
 });
 
 process.on('SIGINT', async () => {
   await mongoose.connection.close();
-  console.log('MongoDB Connection Closed Due to App Termination');
+  console.log('MongoDB connection closed');
   process.exit(0);
 });
 
-/* ======================
-   Security Middleware
-   ====================== */
+// Security Middleware
 app.use(helmet());
-
-const limiter = rateLimit({
+app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per window
-});
-app.use(limiter);
+  max: 200, // limit each IP to 200 requests per windowMs
+  message: "Too many requests, please try again later"
+}));
 
+// Comprehensive CORS Configuration
 const allowedOrigins = [
   "https://frontendphotoplace.vercel.app",
-  "http://localhost:3000"
-];
+  "https://frontendphotoplace-git-main-youssefs-projects-bb475890.vercel.app",
+  "http://localhost:3000",
+  process.env.FRONTEND_URL // Add this to your .env
+].filter(Boolean);
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error("Not allowed by CORS"));
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
     }
   },
-  methods: ["GET", "POST", "DELETE", "PUT"],
-  credentials: true
-}));
-app.options("*", cors());
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
 
-/* ======================
-   Utility Middleware
-   ====================== */
-app.use(express.json({ limit: '10kb' }));
-app.use(morgan("dev"));
+app.use(cors(corsOptions));
 
-/* ======================
-   File Upload Setup
-   ====================== */
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+// Static Files Configuration
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+app.use('/uploads', express.static(uploadsDir));
 
-const sanitizeFilename = (name) => name.replace(/[^a-zA-Z0-9.]/g, "-");
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => cb(null, Date.now() + "-" + sanitizeFilename(file.originalname))
-});
-
-const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith("image/")) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only images are allowed!"), false);
+// Enhanced Body Parsing
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    try {
+      JSON.parse(buf.toString());
+    } catch (e) {
+      throw new Error('Invalid JSON payload');
+    }
   }
-};
+}));
 
-const upload = multer({ 
-  storage, 
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter
-}).single("photo");
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(morgan("dev"));
 
-const parseFormData = multer().none();
+// Secure File Upload Configuration
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (req, file, cb) => {
+      const safeName = Date.now() + '-' + 
+        file.originalname.replace(/[^a-zA-Z0-9.]/g, '-');
+      cb(null, safeName);
+    }
+  }),
+  limits: { 
+    fileSize: 10 * 1024 * 1024, // 10MB
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only images are allowed.'));
+    }
+  }
+}).single('photo');
 
-/* ======================
-   Database Connection
-   ====================== */
+// Database Connection
 connectDB();
 
-// Validate critical environment variables
-if (!process.env.JWT_SECRET || !process.env.MONGODB_URI) {
-  console.error("Missing required environment variables!");
-  process.exit(1);
-}
-
-/* ======================
-   Authentication Middleware
-   ====================== */
+// Enhanced Auth Middleware
 const authMiddleware = (req, res, next) => {
-  const token = req.header("Authorization")?.replace("Bearer ", "");
-
-  if (!token) {
-    return res.status(401).json({ message: "Access denied. No token provided." });
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ message: "Authentication token required" });
   }
 
+  const token = authHeader.split(' ')[1];
+  
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
     next();
-  } catch (error) {
-    res.status(400).json({ message: "Invalid token" });
+  } catch (err) {
+    res.status(401).json({ 
+      message: "Invalid or expired token",
+      error: err.message
+    });
   }
 };
 
-/* ======================
-   API Routes
-   ====================== */
-// Health check endpoint
+// Health Check Route
 app.get("/", (req, res) => {
-  res.status(200).json({ 
-    status: "running", 
-    message: "PhotoPlace backend server is operational",
-    version: "1.0.0",
-    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
-  });
-});
-
-// API documentation endpoint
-app.get("/api-docs", (req, res) => {
   res.json({
-    endpoints: {
-      signup: "POST /api/users/signup",
-      login: "POST /api/users/login",
-      profile: "GET /api/users/:userId/profile",
-      getPhotos: "GET /api/photos",
-      uploadPhoto: "POST /api/photos/upload",
-      deletePhoto: "DELETE /api/photos/:id"
-    },
-    status: {
-      database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-      uploadDirectory: fs.existsSync(uploadsDir) ? "exists" : "missing"
-    }
+    status: "running",
+    apiVersion: "1.2.0",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// User routes
-app.post("/api/users/signup", async (req, res) => {
+// Enhanced User Routes
+app.post("/api/auth/signup", async (req, res) => {
   try {
-    // Validate input
-    if (!req.body.username || !req.body.email || !req.body.password) {
-      return res.status(400).json({ message: "Missing required fields" });
+    const { username, email, password } = req.body;
+    
+    // Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({ 
+        message: "All fields are required",
+        fields: { username: !username, email: !email, password: !password }
+      });
     }
 
-    const hashedPassword = await bcrypt.hash(req.body.password, 12);
-    const user = new User({
-      username: req.body.username,
-      email: req.body.email,
-      password: hashedPassword
+    // Check for existing user
+    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    if (existingUser) {
+      return res.status(409).json({
+        message: "User already exists",
+        conflict: existingUser.username === username ? 'username' : 'email'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const user = new User({ 
+      username, 
+      email, 
+      password: hashedPassword 
     });
 
     await user.save();
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d"
-    });
+    const token = jwt.sign(
+      { userId: user._id }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '7d' }
+    );
 
     res.status(201).json({
-      message: "User created successfully",
       token,
       user: {
         _id: user._id,
         username: user.username,
         email: user.email,
-        profilePicture: user.profilePicture
+        createdAt: user.createdAt
       }
     });
-  } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ 
-        message: "Username or email already exists",
-        field: error.keyValue.username ? "username" : "email"
-      });
-    }
+  } catch (err) {
+    console.error("Signup error:", err);
     res.status(500).json({ 
-      message: "Error creating user", 
-      error: error.message 
+      message: "Registration failed",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
-app.post("/api/users/login", async (req, res) => {
+// Session Check Endpoint
+app.get("/api/auth/session", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findOne({ email: req.body.email });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
-
-    const validPassword = await bcrypt.compare(req.body.password, user.password);
-    if (!validPassword) return res.status(400).json({ message: "Invalid credentials" });
-
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d"
-    });
-
-    res.status(200).json({
-      token,
-      user: {
-        _id: user._id,
-        username: user.username,
-        email: user.email,
-        profilePicture: user.profilePicture,
-        bio: user.bio
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Error logging in", 
-      error: error.message 
-    });
-  }
-});
-
-// New profile endpoint
-app.get("/api/users/:userId/profile", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.userId)
-      .select('-password -__v')
+    const user = await User.findById(req.userId)
+      .select('-password')
       .lean();
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    res.status(200).json(user);
-  } catch (error) {
+    res.json({ user });
+  } catch (err) {
     res.status(500).json({ 
-      message: "Error fetching profile", 
-      error: error.message 
+      message: "Session check failed",
+      error: err.message 
     });
   }
 });
 
-// Photo routes
-app.get("/api/photos", async (req, res) => {
-  try {
-    const query = req.query.userId ? { userId: req.query.userId } : {};
-    const photos = await Photo.find(query)
-      .sort({ createdAt: -1 })
-      .lean();
+// ... [Keep your existing login, photo routes, etc. but ensure they all include proper CORS headers]
 
-    const updatedPhotos = photos.map(photo => ({
-      ...photo,
-      url: `${process.env.BASE_URL || 'http://localhost:' + PORT}${photo.url}`
-    }));
-
-    res.status(200).json(updatedPhotos);
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Error fetching photos", 
-      error: error.message 
-    });
-  }
-});
-
-app.post("/api/photos/upload", authMiddleware, (req, res) => {
-  parseFormData(req, res, (err) => {
-    if (err) return res.status(400).json({ message: "Error parsing form data" });
-
-    upload(req, res, async (err) => {
-      if (err) {
-        return res.status(400).json({ 
-          message: err.code === "LIMIT_FILE_SIZE" 
-            ? "File too large (max 10MB)" 
-            : "Error uploading file" 
-        });
-      }
-
-      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
-      try {
-        const newPhoto = new Photo({
-          title: req.body.title,
-          url: `/uploads/${req.file.filename}`,
-          description: req.body.description,
-          userId: req.userId // Using authenticated user
-        });
-
-        await newPhoto.save();
-        
-        res.status(201).json({
-          message: "Photo uploaded successfully",
-          photo: {
-            ...newPhoto.toObject(),
-            url: `${process.env.BASE_URL || 'http://localhost:' + PORT}${newPhoto.url}`
-          }
-        });
-      } catch (error) {
-        // Clean up uploaded file if save fails
-        if (req.file) {
-          fs.unlinkSync(path.join(uploadsDir, req.file.filename));
-        }
-        res.status(500).json({ 
-          message: "Error uploading photo", 
-          error: error.message 
-        });
-      }
-    });
+// Enhanced Error Handling
+app.use((req, res) => {
+  res.status(404).json({ 
+    message: "Endpoint not found",
+    documentation: process.env.API_DOCS_URL 
   });
-});
-
-app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
-  try {
-    const photo = await Photo.findOne({ 
-      _id: req.params.id,
-      userId: req.userId 
-    });
-
-    if (!photo) {
-      return res.status(404).json({ message: "Photo not found or not authorized" });
-    }
-
-    // Delete file from filesystem
-    const filePath = path.join(__dirname, photo.url);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-
-    await Photo.deleteOne({ _id: req.params.id });
-    
-    res.status(200).json({ message: "Photo deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ 
-      message: "Error deleting photo", 
-      error: error.message 
-    });
-  }
-});
-
-/* ======================
-   Error Handling
-   ====================== */
-app.use((req, res, next) => {
-  res.status(404).json({ message: "Route not found" });
 });
 
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
+  console.error("🚨 Error:", err.stack);
+  
+  // Handle CORS errors specifically
+  if (err.message.includes('CORS')) {
+    return res.status(403).json({ 
+      message: "Cross-origin request denied",
+      allowedOrigins
+    });
+  }
+
+  // Handle file upload errors
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ 
+      message: "File too large. Maximum size is 10MB." 
+    });
+  }
+
   res.status(500).json({ 
     message: "Internal server error",
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    ...(process.env.NODE_ENV === 'development' && { 
+      error: err.message,
+      stack: err.stack 
+    })
   });
 });
 
-/* ======================
-   Server Start
-   ====================== */
+// Server Startup
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔗 Base URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
-  console.log(`🗄️ MongoDB URI: ${process.env.MONGODB_URI.split('@')[1].split('/')[0]}`);
+  console.log(`🌐 Allowed CORS origins: ${allowedOrigins.join(', ')}`);
+  console.log(`🔗 Base URL: ${process.env.BASE_URL}`);
 });
