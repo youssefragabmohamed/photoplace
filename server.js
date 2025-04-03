@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const cookieParser = require("cookie-parser");
 const connectDB = require("./db");
 const Photo = require("./models/photo.js");
 const User = require("./models/user.js");
@@ -34,6 +35,7 @@ process.on('SIGINT', async () => {
 
 // Security Middleware
 app.use(helmet());
+app.use(cookieParser());
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 200, // limit each IP to 200 requests per windowMs
@@ -45,15 +47,12 @@ const allowedOrigins = [
   "https://frontendphotoplace.vercel.app",
   "https://frontendphotoplace-git-main-youssefs-projects-bb475890.vercel.app",
   "http://localhost:3000",
-  process.env.FRONTEND_URL // Add this to your .env
+  process.env.FRONTEND_URL
 ].filter(Boolean);
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error(`Origin ${origin} not allowed by CORS`));
@@ -67,9 +66,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
+app.options('*', cors(corsOptions)); // Handle preflight requests
 
 // Static Files Configuration
 const uploadsDir = path.join(__dirname, "uploads");
@@ -128,14 +125,12 @@ connectDB();
 
 // Enhanced Auth Middleware
 const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
+  const token = req.cookies.token || req.header('Authorization')?.replace('Bearer ', '');
   
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: "Authentication token required" });
+  if (!token) {
+    return res.status(401).json({ message: "Authentication required" });
   }
 
-  const token = authHeader.split(' ')[1];
-  
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId;
@@ -158,12 +153,11 @@ app.get("/", (req, res) => {
   });
 });
 
-// Enhanced User Routes
+// Authentication Routes
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
     
-    // Validation
     if (!username || !email || !password) {
       return res.status(400).json({ 
         message: "All fields are required",
@@ -171,7 +165,6 @@ app.post("/api/auth/signup", async (req, res) => {
       });
     }
 
-    // Check for existing user
     const existingUser = await User.findOne({ $or: [{ username }, { email }] });
     if (existingUser) {
       return res.status(409).json({
@@ -195,6 +188,14 @@ app.post("/api/auth/signup", async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Set HTTP-only cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     res.status(201).json({
       token,
       user: {
@@ -211,6 +212,47 @@ app.post("/api/auth/signup", async (req, res) => {
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const token = jwt.sign(
+      { userId: user._id }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '7d' }
+    );
+
+    // Set HTTP-only cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({
+      token,
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  res.clearCookie('token');
+  res.json({ message: "Logged out successfully" });
 });
 
 // Session Check Endpoint
@@ -233,7 +275,68 @@ app.get("/api/auth/session", authMiddleware, async (req, res) => {
   }
 });
 
-// ... [Keep your existing login, photo routes, etc. but ensure they all include proper CORS headers]
+// Photo Routes
+app.get("/api/photos", async (req, res) => {
+  try {
+    const photos = await Photo.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json(photos);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+app.post("/api/photos/upload", authMiddleware, (req, res) => {
+  upload(req, res, async (err) => {
+    try {
+      if (err) throw err;
+      if (!req.file) throw new Error("No file uploaded");
+
+      const photo = new Photo({
+        title: req.body.title,
+        description: req.body.description,
+        url: `/uploads/${req.file.filename}`,
+        userId: req.userId
+      });
+
+      await photo.save();
+
+      res.status(201).json({
+        photo: {
+          ...photo.toObject(),
+          url: `${process.env.BASE_URL}${photo.url}`
+        }
+      });
+    } catch (err) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      res.status(400).json({ 
+        message: err.code === 'LIMIT_FILE_SIZE' 
+          ? "File too large (max 10MB)" 
+          : err.message 
+      });
+    }
+  });
+});
+
+app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findOneAndDelete({ 
+      _id: req.params.id, 
+      userId: req.userId 
+    });
+
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found or unauthorized" });
+    }
+
+    fs.unlinkSync(path.join(__dirname, photo.url));
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
 
 // Enhanced Error Handling
 app.use((req, res) => {
@@ -246,7 +349,6 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error("🚨 Error:", err.stack);
   
-  // Handle CORS errors specifically
   if (err.message.includes('CORS')) {
     return res.status(403).json({ 
       message: "Cross-origin request denied",
@@ -254,7 +356,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Handle file upload errors
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ 
       message: "File too large. Maximum size is 10MB." 
