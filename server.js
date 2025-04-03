@@ -147,7 +147,7 @@ const authMiddleware = (req, res, next) => {
 app.get("/", (req, res) => {
   res.json({
     status: "running",
-    apiVersion: "1.2.0",
+    apiVersion: "1.3.0",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
   });
@@ -156,7 +156,7 @@ app.get("/", (req, res) => {
 // Authentication Routes
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, fullName } = req.body;
     
     if (!username || !email || !password) {
       return res.status(400).json({ 
@@ -177,7 +177,8 @@ app.post("/api/auth/signup", async (req, res) => {
     const user = new User({ 
       username, 
       email, 
-      password: hashedPassword 
+      password: hashedPassword,
+      fullName: fullName || username
     });
 
     await user.save();
@@ -202,6 +203,7 @@ app.post("/api/auth/signup", async (req, res) => {
         _id: user._id,
         username: user.username,
         email: user.email,
+        fullName: user.fullName,
         createdAt: user.createdAt
       }
     });
@@ -242,7 +244,9 @@ app.post("/api/auth/login", async (req, res) => {
       user: {
         _id: user._id,
         username: user.username,
-        email: user.email
+        email: user.email,
+        fullName: user.fullName,
+        profilePic: user.profilePic
       }
     });
   } catch (err) {
@@ -275,6 +279,46 @@ app.get("/api/auth/session", authMiddleware, async (req, res) => {
   }
 });
 
+// Profile Routes
+app.get("/api/profile/:userId", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId)
+      .select('-password')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const photosCount = await Photo.countDocuments({ userId: user._id });
+    const followersCount = await User.countDocuments({ following: user._id });
+    const followingCount = user.following ? user.following.length : 0;
+
+    res.json({
+      user: {
+        ...user,
+        photosCount,
+        followersCount,
+        followingCount
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+app.get("/api/profile/:userId/photos", async (req, res) => {
+  try {
+    const photos = await Photo.find({ userId: req.params.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json(photos);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
 // Photo Routes
 app.get("/api/photos", async (req, res) => {
   try {
@@ -303,6 +347,11 @@ app.post("/api/photos/upload", authMiddleware, (req, res) => {
 
       await photo.save();
 
+      // Update user's photos count
+      await User.findByIdAndUpdate(req.userId, {
+        $inc: { photosCount: 1 }
+      });
+
       res.status(201).json({
         photo: {
           ...photo.toObject(),
@@ -320,6 +369,18 @@ app.post("/api/photos/upload", authMiddleware, (req, res) => {
   });
 });
 
+app.get("/api/photos/:id", async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.id).lean();
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
+    res.json(photo);
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
 app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
   try {
     const photo = await Photo.findOneAndDelete({ 
@@ -332,7 +393,57 @@ app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
     }
 
     fs.unlinkSync(path.join(__dirname, photo.url));
+    
+    // Update user's photos count
+    await User.findByIdAndUpdate(req.userId, {
+      $inc: { photosCount: -1 }
+    });
+
     res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Follow Routes
+app.post("/api/follow/:userId", authMiddleware, async (req, res) => {
+  try {
+    if (req.params.userId === req.userId) {
+      return res.status(400).json({ message: "Cannot follow yourself" });
+    }
+
+    const userToFollow = await User.findById(req.params.userId);
+    if (!userToFollow) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const currentUser = await User.findById(req.userId);
+    if (currentUser.following.includes(req.params.userId)) {
+      return res.status(400).json({ message: "Already following this user" });
+    }
+
+    await User.findByIdAndUpdate(req.userId, {
+      $addToSet: { following: req.params.userId }
+    });
+
+    res.json({ message: "Successfully followed user" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+app.post("/api/unfollow/:userId", authMiddleware, async (req, res) => {
+  try {
+    const currentUser = await User.findById(req.userId);
+    if (!currentUser.following.includes(req.params.userId)) {
+      return res.status(400).json({ message: "Not following this user" });
+    }
+
+    await User.findByIdAndUpdate(req.userId, {
+      $pull: { following: req.params.userId }
+    });
+
+    res.json({ message: "Successfully unfollowed user" });
   } catch (err) {
     res.status(500).json({ message: "Server error", error: err.message });
   }

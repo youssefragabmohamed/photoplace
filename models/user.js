@@ -1,52 +1,50 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
     required: true,
     unique: true,
-    trim: true,
-    minlength: 3,
-    maxlength: 30
+    trim: true
   },
   email: {
     type: String,
     required: true,
     unique: true,
     trim: true,
-    lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please fill a valid email address']
+    lowercase: true
   },
   password: {
     type: String,
-    required: true,
-    minlength: 6
+    required: true
+  },
+  fullName: {
+    type: String,
+    trim: true
   },
   bio: {
     type: String,
-    default: "",
-    maxlength: 500
+    trim: true,
+    maxlength: 150
   },
-  profilePicture: {
+  profilePic: {
     type: String,
-    default: ""
+    default: '/default-profile.jpg'
   },
   createdAt: {
     type: Date,
     default: Date.now
   }
-}, { 
-  timestamps: true,
-  toJSON: {
-    transform: function(doc, ret) {
-      delete ret.password;
-      return ret;
-    }
-  }
+}, {
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Indexes for faster queries
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ username: 1 }, { unique: true });
+// Add any virtuals or methods you need
+userSchema.virtual('photos', {
+  ref: 'Photo',
+  localField: '_id',
+  foreignField: 'userId'
+});
 
-module.exports = mongoose.model("User", userSchema);
+module.exports = mongoose.model('User', userSchema);
