@@ -26,7 +26,7 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-// Enhanced Security Middleware
+// Middleware
 app.use(helmet());
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
@@ -71,7 +71,13 @@ const upload = multer({
   }
 });
 
-app.use('/uploads', express.static(uploadsDir));
+// Serve static files with proper CORS headers
+app.use('/uploads', express.static(uploadsDir, {
+  setHeaders: (res) => {
+    res.set('Access-Control-Allow-Origin', allowedOrigins.join(', '));
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
 
 // Auth Middleware
 const authMiddleware = (req, res, next) => {
@@ -86,6 +92,19 @@ const authMiddleware = (req, res, next) => {
     res.status(401).json({ message: "Invalid or expired token" });
   }
 };
+
+// Session Endpoint
+app.get("/api/auth/session", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select('-password');
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.status(200).json({ user });
+  } catch (err) {
+    res.status(500).json({ message: "Session check failed", error: err.message });
+  }
+});
 
 // Routes
 app.post("/api/auth/signup", async (req, res) => {
@@ -118,7 +137,14 @@ app.post("/api/auth/signup", async (req, res) => {
       domain: process.env.COOKIE_DOMAIN || undefined
     });
 
-    res.status(201).json({ token, user: { _id: user._id, username: user.username, email: user.email } });
+    res.status(201).json({ 
+      token, 
+      user: { 
+        _id: user._id, 
+        username: user.username, 
+        email: user.email 
+      } 
+    });
   } catch (err) {
     res.status(500).json({ message: "Registration failed", error: err.message });
   }
@@ -164,7 +190,21 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Get all photos
+app.post("/api/auth/logout", authMiddleware, async (req, res) => {
+  try {
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      domain: process.env.COOKIE_DOMAIN || undefined
+    });
+    res.status(200).json({ message: "Logged out successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Logout failed", error: err.message });
+  }
+});
+
+// Photo Endpoints
 app.get("/api/photos", authMiddleware, async (req, res) => {
   try {
     const photos = await Photo.find().populate('userId', 'username');
@@ -174,7 +214,6 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
   }
 });
 
-// Upload photo
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -183,22 +222,20 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       return res.status(400).json({ message: "Title is required" });
     }
 
+    const photoUrl = `/uploads/${req.file.filename}`;
+    const fullUrl = `${req.protocol}://${req.get('host')}${photoUrl}`;
+
     const photo = new Photo({
       title: req.body.title,
       description: req.body.description || "",
-      url: `/uploads/${req.file.filename}`,
+      url: fullUrl,
       userId: req.userId
     });
 
     await photo.save();
     await User.findByIdAndUpdate(req.userId, { $inc: { photosCount: 1 } });
 
-    res.status(201).json({
-      photo: {
-        ...photo.toObject(),
-        url: `${process.env.BASE_URL || `http://localhost:${PORT}`}${photo.url}`
-      }
-    });
+    res.status(201).json({ photo });
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
     res.status(400).json({ 
@@ -209,7 +246,6 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
   }
 });
 
-// Delete photo
 app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
   try {
     const photo = await Photo.findOneAndDelete({ 
@@ -222,7 +258,10 @@ app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
     }
 
     // Delete the file from uploads directory
-    fs.unlinkSync(path.join(__dirname, photo.url));
+    const filePath = path.join(__dirname, photo.url);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
 
     res.status(200).json({ message: "Photo deleted successfully" });
   } catch (err) {
