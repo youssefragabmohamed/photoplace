@@ -61,7 +61,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS Configuration - Enhanced
+// CORS Configuration
 const allowedOrigins = [
   "https://frontendphotoplace.vercel.app",
   "http://localhost:3000",
@@ -70,7 +70,7 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (process.env.NODE_ENV === 'development' || !origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -79,14 +79,12 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
+  exposedHeaders: ['set-cookie'],
+  optionsSuccessStatus: 200
 };
 
-// Apply CORS middleware before routes
 app.use(cors(corsOptions));
-
-// Handle preflight requests explicitly
-app.options('*', cors(corsOptions)); // Enable preflight for all routes
+app.options('*', cors(corsOptions));
 
 // File Upload Configuration
 const uploadsDir = path.join(__dirname, "uploads");
@@ -111,7 +109,7 @@ const upload = multer({
   }
 });
 
-// Serve static files with proper CORS headers
+// Serve static files
 app.use('/uploads', express.static(uploadsDir, {
   setHeaders: (res, path) => {
     res.set('Access-Control-Allow-Origin', allowedOrigins.join(', '));
@@ -120,14 +118,13 @@ app.use('/uploads', express.static(uploadsDir, {
   }
 }));
 
-// Health check endpoint (no auth required)
+// Health check endpoint
 app.get('/healthcheck', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
-// Auth Middleware (updated to handle OPTIONS requests)
+// Auth Middleware
 const authMiddleware = (req, res, next) => {
-  // Skip auth for OPTIONS requests
   if (req.method === 'OPTIONS') return next();
   
   const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
@@ -146,9 +143,7 @@ const authMiddleware = (req, res, next) => {
 app.get("/api/auth/session", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.userId).select('-password');
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ message: "User not found" });
     res.status(200).json({ user });
   } catch (err) {
     res.status(500).json({ message: "Session check failed", error: err.message });
@@ -183,7 +178,7 @@ app.post("/api/auth/signup", async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       maxAge: 604800000,
-      domain: process.env.COOKIE_DOMAIN || undefined // Let browser handle domain
+      domain: process.env.COOKIE_DOMAIN || undefined
     });
 
     res.status(201).json({ 
@@ -262,15 +257,23 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
+      return res.status(400).json({ 
+        message: "No file uploaded",
+        details: "Ensure you're sending the file with field name 'photo' in FormData"
+      });
     }
 
     if (!req.body.title) {
       fs.unlinkSync(req.file.path);
-      return res.status(400).json({ message: "Title is required" });
+      return res.status(400).json({ 
+        message: "Title is required",
+        details: "Include a title in your form data"
+      });
     }
 
-    const photoUrl = `${req.secure ? 'https' : 'http'}://${req.get('host')}/uploads/${req.file.filename}`;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const photoUrl = `${protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    
     const photo = new Photo({
       title: req.body.title,
       description: req.body.description || "",
@@ -279,10 +282,19 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
     });
 
     await photo.save();
-    res.status(201).json({ photo });
+    res.status(201).json({ 
+      success: true,
+      photo,
+      message: "Photo uploaded successfully"
+    });
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
-    res.status(500).json({ message: "Upload failed", error: err.message });
+    console.error('Upload error:', err);
+    res.status(500).json({ 
+      message: "Upload failed", 
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 });
 
@@ -316,12 +328,10 @@ app.use((req, res) => res.status(404).json({ message: "Endpoint not found" }));
 app.use((err, req, res, next) => {
   console.error("Server Error:", err.stack);
   
-  // Handle CORS errors specifically
   if (err.message.includes('CORS')) {
     return res.status(403).json({ message: err.message });
   }
   
-  // Handle Multer file errors
   if (err.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ message: "File too large (max 10MB)" });
   }
