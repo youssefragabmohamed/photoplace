@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
@@ -125,7 +124,6 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
-// Login Endpoint
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -166,7 +164,17 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Updated Upload Endpoint
+// Get all photos
+app.get("/api/photos", authMiddleware, async (req, res) => {
+  try {
+    const photos = await Photo.find().populate('userId', 'username');
+    res.status(200).json(photos);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch photos", error: err.message });
+  }
+});
+
+// Upload photo
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -198,6 +206,27 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
         ? "File too large (max 10MB)" 
         : err.message 
     });
+  }
+});
+
+// Delete photo
+app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findOneAndDelete({ 
+      _id: req.params.id,
+      userId: req.userId 
+    });
+
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
+
+    // Delete the file from uploads directory
+    fs.unlinkSync(path.join(__dirname, photo.url));
+
+    res.status(200).json({ message: "Photo deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to delete photo", error: err.message });
   }
 });
 
