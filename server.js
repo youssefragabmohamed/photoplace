@@ -26,13 +26,21 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-// Middleware
+// Enhanced Security Middleware
 app.use(helmet());
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan("dev"));
+
+// Force HTTPS in production
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && !req.secure) {
+    return res.redirect(`https://${req.headers.host}${req.url}`);
+  }
+  next();
+});
 
 // CORS Configuration
 const allowedOrigins = [
@@ -76,6 +84,7 @@ app.use('/uploads', express.static(uploadsDir, {
   setHeaders: (res) => {
     res.set('Access-Control-Allow-Origin', allowedOrigins.join(', '));
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('Cache-Control', 'public, max-age=31536000');
   }
 }));
 
@@ -106,7 +115,7 @@ app.get("/api/auth/session", authMiddleware, async (req, res) => {
   }
 });
 
-// Routes
+// Auth Routes
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
@@ -134,7 +143,7 @@ app.post("/api/auth/signup", async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       maxAge: 604800000,
-      domain: process.env.COOKIE_DOMAIN || undefined
+      domain: process.env.COOKIE_DOMAIN || '.onrender.com'
     });
 
     res.status(201).json({ 
@@ -174,7 +183,7 @@ app.post("/api/auth/login", async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       maxAge: 604800000,
-      domain: process.env.COOKIE_DOMAIN || undefined
+      domain: process.env.COOKIE_DOMAIN || '.onrender.com'
     });
 
     res.status(200).json({ 
@@ -190,24 +199,20 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-app.post("/api/auth/logout", authMiddleware, async (req, res) => {
-  try {
-    res.clearCookie('token', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'none',
-      domain: process.env.COOKIE_DOMAIN || undefined
-    });
-    res.status(200).json({ message: "Logged out successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Logout failed", error: err.message });
-  }
+app.post("/api/auth/logout", authMiddleware, (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'none',
+    domain: process.env.COOKIE_DOMAIN || '.onrender.com'
+  });
+  res.status(200).json({ message: "Logged out successfully" });
 });
 
 // Photo Endpoints
 app.get("/api/photos", authMiddleware, async (req, res) => {
   try {
-    const photos = await Photo.find().populate('userId', 'username');
+    const photos = await Photo.find({ userId: req.userId }).populate('userId', 'username');
     res.status(200).json(photos);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch photos", error: err.message });
@@ -216,39 +221,36 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
 
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+    if (!req.file) {
+      console.log('No file received in upload');
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
     if (!req.body.title) {
       fs.unlinkSync(req.file.path);
       return res.status(400).json({ message: "Title is required" });
     }
 
-    const photoUrl = `/uploads/${req.file.filename}`;
-    const fullUrl = `${req.protocol}://${req.get('host')}${photoUrl}`;
-
+    const photoUrl = `https://${req.get('host')}/uploads/${req.file.filename}`;
     const photo = new Photo({
       title: req.body.title,
       description: req.body.description || "",
-      url: fullUrl,
+      url: photoUrl,
       userId: req.userId
     });
 
     await photo.save();
-    await User.findByIdAndUpdate(req.userId, { $inc: { photosCount: 1 } });
-
     res.status(201).json({ photo });
   } catch (err) {
+    console.error('Upload error:', err);
     if (req.file) fs.unlinkSync(req.file.path);
-    res.status(400).json({ 
-      message: err.code === 'LIMIT_FILE_SIZE' 
-        ? "File too large (max 10MB)" 
-        : err.message 
-    });
+    res.status(500).json({ message: "Upload failed", error: err.message });
   }
 });
 
 app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
   try {
-    const photo = await Photo.findOneAndDelete({ 
+    const photo = await Photo.findOne({ 
       _id: req.params.id,
       userId: req.userId 
     });
@@ -257,14 +259,20 @@ app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Photo not found" });
     }
 
-    // Delete the file from uploads directory
-    const filePath = path.join(__dirname, photo.url);
+    // Delete file from filesystem
+    const filename = photo.url.split('/uploads/')[1];
+    const filePath = path.join(uploadsDir, filename);
+    
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
 
+    // Delete from database
+    await Photo.deleteOne({ _id: req.params.id });
+
     res.status(200).json({ message: "Photo deleted successfully" });
   } catch (err) {
+    console.error('Delete error:', err);
     res.status(500).json({ message: "Failed to delete photo", error: err.message });
   }
 });
@@ -272,7 +280,7 @@ app.delete("/api/photos/:id", authMiddleware, async (req, res) => {
 // Error Handling
 app.use((req, res) => res.status(404).json({ message: "Endpoint not found" }));
 app.use((err, req, res, next) => {
-  console.error("Error:", err.stack);
+  console.error("Server Error:", err.stack);
   res.status(500).json({ message: "Internal server error" });
 });
 
