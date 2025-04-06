@@ -50,12 +50,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan("dev"));
 
-// Force HTTPS in production (with exception for health checks)
+// Force HTTPS in production
 app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'production' && 
-      !req.secure && 
-      req.headers['x-forwarded-proto'] !== 'https' &&
-      !req.path.includes('/healthcheck')) {
+  if (process.env.NODE_ENV === 'production' && req.headers['x-forwarded-proto'] !== 'https') {
     return res.redirect(`https://${req.headers.host}${req.url}`);
   }
   next();
@@ -109,12 +106,13 @@ const upload = multer({
   }
 });
 
-// Serve static files
+// Serve static files with proper CORS headers
 app.use('/uploads', express.static(uploadsDir, {
   setHeaders: (res, path) => {
     res.set('Access-Control-Allow-Origin', allowedOrigins.join(', '));
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('Content-Security-Policy', 'upgrade-insecure-requests');
   }
 }));
 
@@ -178,7 +176,7 @@ app.post("/api/auth/signup", async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       maxAge: 604800000,
-      domain: process.env.COOKIE_DOMAIN || undefined
+      domain: process.env.COOKIE_DOMAIN || '.onrender.com'
     });
 
     res.status(201).json({ 
@@ -218,7 +216,7 @@ app.post("/api/auth/login", async (req, res) => {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'none',
       maxAge: 604800000,
-      domain: process.env.COOKIE_DOMAIN || undefined
+      domain: process.env.COOKIE_DOMAIN || '.onrender.com'
     });
 
     res.status(200).json({ 
@@ -239,7 +237,7 @@ app.post("/api/auth/logout", authMiddleware, (req, res) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'none',
-    domain: process.env.COOKIE_DOMAIN || undefined
+    domain: process.env.COOKIE_DOMAIN || '.onrender.com'
   });
   res.status(200).json({ message: "Logged out successfully" });
 });
@@ -251,6 +249,23 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
     res.status(200).json(photos);
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch photos", error: err.message });
+  }
+});
+
+app.get("/api/photos/:id", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findOne({
+      _id: req.params.id,
+      userId: req.userId
+    }).populate('userId', 'username');
+
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
+
+    res.status(200).json(photo);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch photo", error: err.message });
   }
 });
 
@@ -271,8 +286,7 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       });
     }
 
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const photoUrl = `${protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    const photoUrl = `https://${req.get('host')}/uploads/${req.file.filename}`;
     
     const photo = new Photo({
       title: req.body.title,
@@ -289,11 +303,9 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
     });
   } catch (err) {
     if (req.file) fs.unlinkSync(req.file.path);
-    console.error('Upload error:', err);
     res.status(500).json({ 
       message: "Upload failed", 
-      error: err.message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      error: err.message
     });
   }
 });
