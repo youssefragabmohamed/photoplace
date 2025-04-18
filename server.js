@@ -10,7 +10,6 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const sizeOf = require('image-size');
 const cookieParser = require("cookie-parser");
 const connectDB = require("./db");
 const Photo = require("./models/photo.js");
@@ -155,7 +154,6 @@ app.get('/healthcheck', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
     uploadsDirExists: fs.existsSync(uploadsDir),
-    diskSpace: require('diskusage').checkSync(uploadsDir)
   });
 });
 
@@ -257,8 +255,6 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
-// [Other auth routes remain the same...]
-
 // Photo Upload with enhanced error handling
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
@@ -267,7 +263,6 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
         message: "No file uploaded",
         details: {
           allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
-          maxSize: "10MB"
         }
       });
     }
@@ -284,26 +279,12 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       });
     }
 
-    // Get image dimensions
-    let dimensions;
-    try {
-      dimensions = sizeOf(req.file.path);
-    } catch (err) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ 
-        message: "Invalid image file",
-        details: "The uploaded file is not a valid image"
-      });
-    }
-
     const photoUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
     
     const photo = new Photo({
       title: req.body.title,
       description: req.body.description || "",
       url: photoUrl,
-      width: dimensions.width,
-      height: dimensions.height,
       userId: req.userId
     });
 
@@ -349,8 +330,6 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
     });
   }
 });
-
-// [Other photo routes remain the same...]
 
 // Enhanced Error Handling
 app.use((req, res) => res.status(404).json({ 
