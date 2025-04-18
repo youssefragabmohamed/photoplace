@@ -65,10 +65,11 @@ app.use((req, res, next) => {
 
 const corsOptions = {
   origin: function (origin, callback) {
+    console.log("Request Origin:", req.headers.origin);
     if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+      callback(null, true); // Allow the request
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(new Error('Not allowed by CORS')); // Reject the request
     }
   },
   credentials: true, // Allow cookies to be sent
