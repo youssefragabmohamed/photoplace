@@ -15,11 +15,13 @@ const photoSchema = new mongoose.Schema({
     type: String,
     maxlength: 500
   },
-  width: {
-    type: Number
+  width: {  // ← NEW FIELD
+    type: Number,
+    required: true
   },
-  height: {
-    type: Number
+  height: {  // ← NEW FIELD
+    type: Number,
+    required: true
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,

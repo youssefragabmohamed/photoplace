@@ -35,7 +35,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https://*.onrender.com"],
-      connectSrc: ["'self'", "https://*.onrender.com", "https://frontendphotoplace.vercel.app"]
+      connectSrc: ["'self'", process.env.ALLOWED_ORIGINS].filter(Boolean)
     }
   },
   crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -60,11 +60,7 @@ app.use((req, res, next) => {
 });
 
 // CORS Configuration
-const allowedOrigins = [
-  "https://frontendphotoplace.vercel.app",
-  "http://localhost:3000",
-  process.env.FRONTEND_URL
-].filter(Boolean);
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
 const corsOptions = {
   origin: function (origin, callback) {
