@@ -120,6 +120,7 @@ if (!fs.existsSync(uploadsDir)) {
   }
 }
 
+// File Upload Configuration without file size limitations
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
@@ -130,10 +131,6 @@ const upload = multer({
       cb(null, safeName);
     }
   }),
-  limits: { 
-    fileSize: 10 * 1024 * 1024,
-    files: 1
-  },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (allowedTypes.includes(file.mimetype)) {
