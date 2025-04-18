@@ -65,7 +65,7 @@ app.use((req, res, next) => {
 
 const corsOptions = {
   origin: function (origin, callback) {
-    console.log("Request Origin:", req.headers.origin);
+    console.log("Request Origin:", origin); // Use the 'origin' parameter instead of 'req.headers.origin'
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true); // Allow the request
     } else {
