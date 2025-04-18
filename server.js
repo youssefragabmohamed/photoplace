@@ -337,6 +337,22 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
   }
 });
 
+// Get all photos for gallery (authenticated)
+app.get("/api/photos", authMiddleware, async (req, res) => {
+  try {
+    const photos = await Photo.find({})
+      .populate('userId', 'username profilePic')
+      .sort({ createdAt: -1 }); // Newest first
+
+    res.status(200).json(photos);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to fetch gallery photos",
+      error: err.message
+    });
+  }
+});
+
 // [Other photo routes remain the same...]
 
 // Enhanced Error Handling
