@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const sizeOf = require('image-size');
 const cookieParser = require("cookie-parser");
 const connectDB = require("./db");
 const Photo = require("./models/photo.js");
@@ -286,12 +287,16 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       });
     }
 
+    // Get image dimensions
+    const dimensions = sizeOf(req.file.path);
     const photoUrl = `https://${req.get('host')}/uploads/${req.file.filename}`;
     
     const photo = new Photo({
       title: req.body.title,
       description: req.body.description || "",
       url: photoUrl,
+      width: dimensions.width,
+      height: dimensions.height,
       userId: req.userId
     });
 

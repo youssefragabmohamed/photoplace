@@ -15,6 +15,12 @@ const photoSchema = new mongoose.Schema({
     type: String,
     maxlength: 500
   },
+  width: {
+    type: Number
+  },
+  height: {
+    type: Number
+  },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
