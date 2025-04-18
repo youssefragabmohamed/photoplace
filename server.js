@@ -27,6 +27,10 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
+// CORS Configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(origin => origin.trim()) || [];
+console.log("Allowed Origins:", allowedOrigins);
+
 // Enhanced Security Middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -35,7 +39,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https://*.onrender.com"],
-      connectSrc: ["'self'", process.env.ALLOWED_ORIGINS].filter(Boolean)
+      connectSrc: ["'self'", ...allowedOrigins], // Spread the array of allowed origins
     }
   },
   crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -58,9 +62,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// CORS Configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
 
 const corsOptions = {
   origin: function (origin, callback) {
