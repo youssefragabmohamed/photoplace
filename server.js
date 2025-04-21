@@ -17,6 +17,7 @@ const User = require("./models/user.js");
 
 // Import user routes
 const userRoutes = require('./routes/users');
+const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
