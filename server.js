@@ -516,6 +516,25 @@ app.delete("/api/photos/:photoId", authMiddleware, async (req, res) => {
   }
 });
 
+// Get single photo by ID
+app.get("/api/photos/:photoId", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.photoId)
+      .populate('userId', 'username profilePic');
+    
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
+
+    res.status(200).json(photo);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to fetch photo",
+      error: err.message
+    });
+  }
+});
+
 // Use user routes
 app.use('/api/users', userRoutes);
 
