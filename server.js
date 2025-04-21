@@ -83,17 +83,10 @@ app.use((req, res, next) => {
 // Improved CORS configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    console.log("Incoming Origin:", origin);
-    
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.some(allowedOrigin => {
-      // Compare origins directly or check if the request origin matches a pattern
-      return origin === allowedOrigin || 
-             origin.startsWith(allowedOrigin.replace('https://', 'http://')) ||
-             origin.endsWith(`.${allowedOrigin.replace(/https?:\/\//, '')}`);
-    })) {
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     
@@ -103,7 +96,6 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['set-cookie'],
   optionsSuccessStatus: 200
 };
 
@@ -333,6 +325,22 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
   } catch (err) {
     res.status(500).json({
       message: "Failed to fetch gallery photos",
+      error: err.message
+    });
+  }
+});
+
+// Get photos by user ID
+app.get("/api/photos/user/:userId", authMiddleware, async (req, res) => {
+  try {
+    const photos = await Photo.find({ userId: req.params.userId })
+      .populate('userId', 'username profilePic')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json(photos);
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to fetch user photos",
       error: err.message
     });
   }
