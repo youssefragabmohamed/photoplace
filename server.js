@@ -99,7 +99,12 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 
-app.use(cors(corsOptions));
+app.use(cors({
+  origin: 'https://frontendphotoplace.vercel.app', // Allow only your frontend domain
+  methods: 'GET,POST,PUT,DELETE', // Allow these methods
+  credentials: true, // If you're sending cookies or session data
+}));
+
 app.options('*', cors(corsOptions));
 
 // File Upload Configuration with better error handling
