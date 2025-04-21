@@ -258,6 +258,10 @@ app.post("/api/auth/signup", async (req, res) => {
 // Photo Upload with enhanced error handling
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
+    console.log("File:", req.file);
+    console.log("Title:", req.body.title);
+    console.log("User ID:", req.userId);
+
     if (!req.file) {
       return res.status(400).json({ 
         message: "No file uploaded",
