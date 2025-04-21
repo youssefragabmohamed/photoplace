@@ -181,6 +181,24 @@ app.get("/api/auth/session", authMiddleware, async (req, res) => {
   }
 });
 
+// Logout Endpoint
+app.post("/api/auth/logout", authMiddleware, (req, res) => {
+  try {
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      domain: process.env.COOKIE_DOMAIN || '.onrender.com'
+    });
+    res.status(200).json({ message: "Logged out successfully" });
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Logout failed", 
+      error: err.message 
+    });
+  }
+});
+
 // Profile Endpoint (NEW)
 app.get("/api/profile/:userId", authMiddleware, async (req, res) => {
   try {
@@ -250,6 +268,50 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
+// Login Endpoint
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password required" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none',
+      maxAge: 604800000,
+      domain: process.env.COOKIE_DOMAIN || '.onrender.com'
+    });
+
+    res.status(200).json({ 
+      token,
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Login failed", 
+      error: err.message 
+    });
+  }
+});
+
 // Photo Upload with enhanced error handling
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
@@ -278,7 +340,7 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       });
     }
 
-    const photoUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    const photoUrl = `https://${req.get('host')}/uploads/${req.file.filename}`;
     
     const photo = new Photo({
       title: req.body.title,
@@ -419,6 +481,38 @@ app.get("/api/profile/:userId", authMiddleware, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch profile", error: err.message });
+  }
+});
+
+// Delete Photo by ID
+app.delete("/api/photos/:photoId", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findOneAndDelete({ 
+      _id: req.params.photoId,
+      userId: req.userId // Ensure user can only delete their own photos
+    });
+
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found or unauthorized" });
+    }
+
+    // Delete the actual file from uploads directory
+    try {
+      const filename = photo.url.split('/').pop();
+      const filePath = path.join(uploadsDir, filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (fileErr) {
+      console.error("File deletion error:", fileErr);
+    }
+
+    res.status(200).json({ message: "Photo deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to delete photo", 
+      error: err.message 
+    });
   }
 });
 
