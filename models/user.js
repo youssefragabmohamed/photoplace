@@ -31,6 +31,18 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: '/default-profile.jpg'
   },
+  followers: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  ],
+  following: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  ],
   createdAt: {
     type: Date,
     default: Date.now
@@ -40,7 +52,7 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Add any virtuals or methods you need
+// Virtual population for photos
 userSchema.virtual('photos', {
   ref: 'Photo',
   localField: '_id',

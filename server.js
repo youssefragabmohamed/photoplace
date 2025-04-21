@@ -15,6 +15,9 @@ const connectDB = require("./db");
 const Photo = require("./models/photo.js");
 const User = require("./models/user.js");
 
+// Import user routes
+const userRoutes = require('./routes/users');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -334,6 +337,85 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
     });
   }
 });
+
+// Follow User Route
+app.post("/api/follow/:userId", authMiddleware, async (req, res) => {
+  try {
+    const targetUser = await User.findById(req.params.userId);
+    if (!targetUser) return res.status(404).json({ message: "User not found" });
+
+    const currentUser = await User.findById(req.userId);
+    if (targetUser._id.equals(currentUser._id)) {
+      return res.status(400).json({ message: "You cannot follow yourself" });
+    }
+
+    // Add user to followers and following
+    if (!targetUser.followers.includes(currentUser._id)) {
+      targetUser.followers.push(currentUser._id);
+      currentUser.following.push(targetUser._id);
+
+      await targetUser.save();
+      await currentUser.save();
+
+      res.status(200).json({ message: "Followed user successfully" });
+    } else {
+      res.status(400).json({ message: "Already following this user" });
+    }
+  } catch (err) {
+    res.status(500).json({ message: "Failed to follow user", error: err.message });
+  }
+});
+
+// Unfollow User Route
+app.post("/api/unfollow/:userId", authMiddleware, async (req, res) => {
+  try {
+    const targetUser = await User.findById(req.params.userId);
+    if (!targetUser) return res.status(404).json({ message: "User not found" });
+
+    const currentUser = await User.findById(req.userId);
+
+    // Remove user from followers and following
+    if (targetUser.followers.includes(currentUser._id)) {
+      targetUser.followers = targetUser.followers.filter(id => !id.equals(currentUser._id));
+      currentUser.following = currentUser.following.filter(id => !id.equals(targetUser._id));
+
+      await targetUser.save();
+      await currentUser.save();
+
+      res.status(200).json({ message: "Unfollowed user successfully" });
+    } else {
+      res.status(400).json({ message: "You are not following this user" });
+    }
+  } catch (err) {
+    res.status(500).json({ message: "Failed to unfollow user", error: err.message });
+  }
+});
+
+// Profile Endpoint (with following and followers count)
+app.get("/api/profile/:userId", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select('-password');
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const photos = await Photo.find({ userId: req.params.userId });
+
+    const isFollowing = user.followers.includes(req.userId);
+
+    res.status(200).json({
+      user,
+      isFollowing,
+      followersCount: user.followers.length,
+      followingCount: user.following.length,
+      photosCount: photos.length,
+      joined: user.createdAt
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch profile", error: err.message });
+  }
+});
+
+// Use user routes
+app.use('/api/users', userRoutes);
 
 // Enhanced Error Handling
 app.use((req, res) => res.status(404).json({ 
