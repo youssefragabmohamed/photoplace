@@ -322,6 +322,7 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
   try {
     console.log("File:", req.file);
     console.log("Title:", req.body.title);
+    console.log("Location:", req.body.location);
     console.log("User ID:", req.userId);
 
     if (!req.file) {
@@ -351,7 +352,8 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       title: req.body.title,
       description: req.body.description || "",
       url: photoUrl,
-      userId: req.userId
+      userId: req.userId,
+      location: req.body.location || 'digital' // Default to digital if not provided
     });
 
     await photo.save();
@@ -364,7 +366,6 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
   } catch (err) {
     console.error("Upload Error:", err);
     
-    // Clean up uploaded file if error occurred
     try {
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
@@ -381,12 +382,19 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
   }
 });
 
-// Get all photos for gallery (authenticated)
+// Get all photos for gallery with optional location filter
 app.get("/api/photos", authMiddleware, async (req, res) => {
   try {
-    const photos = await Photo.find({})
+    const query = {};
+    
+    // Add location filter if provided in query params
+    if (req.query.location) {
+      query.location = req.query.location;
+    }
+
+    const photos = await Photo.find(query)
       .populate('userId', 'username profilePic')
-      .sort({ createdAt: -1 }); // Newest first
+      .sort({ createdAt: -1 });
 
     res.status(200).json(photos);
   } catch (err) {
@@ -397,10 +405,17 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
   }
 });
 
-// Get photos by user ID
+// Get photos by user ID with optional location filter
 app.get("/api/photos/user/:userId", authMiddleware, async (req, res) => {
   try {
-    const photos = await Photo.find({ userId: req.params.userId })
+    const query = { userId: req.params.userId };
+    
+    // Add location filter if provided in query params
+    if (req.query.location) {
+      query.location = req.query.location;
+    }
+
+    const photos = await Photo.find(query)
       .populate('userId', 'username profilePic')
       .sort({ createdAt: -1 });
 

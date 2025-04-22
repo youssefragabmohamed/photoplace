@@ -5,8 +5,14 @@ const photoSchema = new mongoose.Schema({
   description: String,
   url: { type: String, required: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  height: Number, // made optional for Pinterest-style layout
-  width: Number,  // made optional
+  location: { 
+    type: String, 
+    required: true,
+    enum: ['digital', 'traditional'], // Only allow these values
+    default: 'digital'
+  },
+  height: Number,
+  width: Number,
   createdAt: { type: Date, default: Date.now }
 });
 
