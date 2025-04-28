@@ -42,11 +42,30 @@ process.on('SIGINT', async () => {
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) 
   : [
-      "https://frontendphotoplace.vercel.app",
-      "http://localhost:3000"
+      "https://frontendphotoplace.vercel.app", // Frontend domain
+      "http://localhost:3000" // Local development
     ];
 
 console.log("Allowed Origins:", allowedOrigins);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.error('CORS Error: Origin not allowed -', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // Allow cookies and credentials
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allowed HTTP methods
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'], // Allowed headers
+  optionsSuccessStatus: 200 // For legacy browsers
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
 
 // Enhanced Security Middleware
 app.use(helmet({
@@ -79,33 +98,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// Improved CORS configuration
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    console.error('CORS Error: Origin not allowed -', origin);
-    callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200
-};
-
-app.use(cors({
-  origin: 'https://frontendphotoplace.vercel.app', // Allow only your frontend domain
-  methods: 'GET,POST,PUT,DELETE', // Allow these methods
-  credentials: true, // If you're sending cookies or session data
-}));
-
-app.options('*', cors(corsOptions));
 
 // File Upload Configuration with better error handling
 const uploadsDir = path.join(process.cwd(), "uploads");

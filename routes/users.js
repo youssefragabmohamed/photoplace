@@ -1,79 +1,84 @@
 const express = require('express');
-const User = require('../models/user');  // Make sure this path is correct based on your project structure
-const authMiddleware = require('../middleware/auth');  // Adjust the path based on where your auth middleware is located
+const User = require('../models/user');
+const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 
-// Route to get a user's profile (including bio and portfolio)
+// Get current user's profile
+router.get('/me', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+      .select('-password')
+      .populate('savedPhotos');
+    res.status(200).json({ user });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch profile", error: err.message });
+  }
+});
+
+// Get any user's profile
 router.get('/:userId', authMiddleware, async (req, res) => {
   try {
-    // Fetch the user by userId, excluding the password field
-    const user = await User.findById(req.params.userId).select('-password');
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
+    const user = await User.findById(req.params.userId)
+      .select('-password -savedPhotos')
+      .populate('followers following', 'username profilePic');
+    
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Return the user data
-    res.status(200).json({ user });
+    const isFollowing = user.followers.some(id => id.equals(req.userId));
+    res.status(200).json({ 
+      user,
+      isFollowing,
+      followersCount: user.followers.length,
+      followingCount: user.following.length
+    });
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch user profile", error: err.message });
+    res.status(500).json({ message: "Failed to fetch profile", error: err.message });
   }
 });
 
-// Route to update a user's profile (username, email, bio, portfolio, etc.)
-router.put('/:userId', authMiddleware, async (req, res) => {
+// Update profile
+router.patch('/:userId', authMiddleware, async (req, res) => {
   try {
-    // Ensure the logged-in user can only update their own profile
     if (req.params.userId !== req.userId) {
-      return res.status(403).json({ message: "You can only update your own profile" });
+      return res.status(403).json({ message: "Unauthorized" });
     }
 
-    const { username, email, bio, location, portfolio } = req.body;
+    const updates = Object.keys(req.body);
+    const allowedUpdates = [
+      'username', 'email', 'bio', 'link', 'location',
+      'portfolio', 'portfolioTitle', 'portfolioDescription'
+    ];
+    const isValidOperation = updates.every(update => allowedUpdates.includes(update));
 
-    // Prepare the update object with fields that can be updated
-    const updateFields = {};
-    if (username) updateFields.username = username;
-    if (email) updateFields.email = email;
-    if (bio) updateFields.bio = bio;
-    if (location) updateFields.location = location;
-    if (portfolio && Array.isArray(portfolio)) updateFields.portfolio = portfolio;
+    if (!isValidOperation) {
+      return res.status(400).json({ message: "Invalid updates!" });
+    }
 
-    // Update the user data
     const user = await User.findByIdAndUpdate(
       req.params.userId,
-      updateFields,
-      { new: true }  // Return the updated user document
-    ).select('-password');  // Exclude password from the response
+      req.body,
+      { new: true, runValidators: true }
+    ).select('-password');
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Return the updated user
     res.status(200).json({ user });
   } catch (err) {
-    res.status(500).json({ message: "Failed to update user profile", error: err.message });
+    res.status(500).json({ message: "Update failed", error: err.message });
   }
 });
 
-// Route to delete a user's profile
+// Delete profile
 router.delete('/:userId', authMiddleware, async (req, res) => {
   try {
-    // Ensure the logged-in user can only delete their own profile
     if (req.params.userId !== req.userId) {
-      return res.status(403).json({ message: "You can only delete your own profile" });
+      return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // Delete the user
     const user = await User.findByIdAndDelete(req.params.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Return success message
     res.status(200).json({ message: "User deleted successfully" });
   } catch (err) {
-    res.status(500).json({ message: "Failed to delete user", error: err.message });
+    res.status(500).json({ message: "Delete failed", error: err.message });
   }
 });
 

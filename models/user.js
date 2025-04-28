@@ -25,33 +25,45 @@ const userSchema = new mongoose.Schema({
   bio: {
     type: String,
     trim: true,
-    maxlength: 150
+    maxlength: 500
   },
-  location: {
-    type: String, // Field for the user's location
+  link: {
+    type: String,
     trim: true
   },
-  portfolio: [
-    {
-      type: String // Array to store portfolio links (image URLs or references)
-    }
-  ],
+  location: {
+    type: String,
+    trim: true
+  },
+  portfolio: [{
+    url: String,
+    title: String,
+    description: String
+  }],
+  portfolioTitle: {
+    type: String,
+    default: 'My Portfolio'
+  },
+  portfolioDescription: {
+    type: String,
+    default: ''
+  },
   profilePic: {
     type: String,
     default: '/default-profile.jpg'
   },
-  followers: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }
-  ],
-  following: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }
-  ],
+  followers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  following: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  savedPhotos: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Photo'
+  }],
   createdAt: {
     type: Date,
     default: Date.now
@@ -66,6 +78,16 @@ userSchema.virtual('photos', {
   ref: 'Photo',
   localField: '_id',
   foreignField: 'userId'
+});
+
+// Virtual for followers count
+userSchema.virtual('followersCount').get(function() {
+  return this.followers.length;
+});
+
+// Virtual for following count
+userSchema.virtual('followingCount').get(function() {
+  return this.following.length;
 });
 
 module.exports = mongoose.model('User', userSchema);
