@@ -27,6 +27,15 @@ const userSchema = new mongoose.Schema({
     trim: true,
     maxlength: 150
   },
+  location: {
+    type: String, // Field for the user's location
+    trim: true
+  },
+  portfolio: [
+    {
+      type: String // Array to store portfolio links (image URLs or references)
+    }
+  ],
   profilePic: {
     type: String,
     default: '/default-profile.jpg'
