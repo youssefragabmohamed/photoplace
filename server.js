@@ -555,6 +555,65 @@ app.get("/api/photos/:photoId", authMiddleware, async (req, res) => {
   }
 });
 
+// Save Photo Route
+app.post("/api/photos/save/:photoId", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.photoId);
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Check if already saved
+    const alreadySaved = user.savedPhotos.includes(photo._id);
+    
+    if (alreadySaved) {
+      // Remove from saved
+      user.savedPhotos = user.savedPhotos.filter(id => !id.equals(photo._id));
+      await user.save();
+      return res.status(200).json({ 
+        message: "Photo removed from saved", 
+        isSaved: false 
+      });
+    } else {
+      // Add to saved
+      user.savedPhotos.push(photo._id);
+      await user.save();
+      return res.status(200).json({ 
+        message: "Photo saved successfully", 
+        isSaved: true 
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to save photo", 
+      error: err.message 
+    });
+  }
+});
+
+// Get Saved Photos Route
+app.get("/api/photos/saved", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).populate({
+      path: 'savedPhotos',
+      populate: {
+        path: 'userId',
+        select: 'username profilePic'
+      }
+    });
+    
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json(user.savedPhotos);
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to fetch saved photos", 
+      error: err.message 
+    });
+  }
+});
+
 // Use user routes
 app.use('/api/users', userRoutes);
 
