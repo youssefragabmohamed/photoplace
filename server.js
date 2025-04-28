@@ -377,22 +377,16 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
 // Get all photos for gallery with optional location filter
 app.get("/api/photos", authMiddleware, async (req, res) => {
   try {
-    const query = {};
-    
-    // Add location filter if provided in query params
-    if (req.query.location) {
-      query.location = req.query.location;
-    }
-
-    const photos = await Photo.find(query)
+    const photos = await Photo.find({})
       .populate('userId', 'username profilePic')
       .sort({ createdAt: -1 });
-
-    res.status(200).json(photos);
+    
+    res.status(200).json(photos || []);
   } catch (err) {
+    console.error("Photos error:", err);
     res.status(500).json({
-      message: "Failed to fetch gallery photos",
-      error: err.message
+      message: "Failed to fetch photos",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
@@ -596,12 +590,14 @@ app.get("/api/photos/saved", authMiddleware, async (req, res) => {
     });
     
     if (!user) return res.status(404).json({ message: "User not found" });
-
-    res.status(200).json(user.savedPhotos);
+    
+    // Return empty array if no saved photos
+    res.status(200).json(user.savedPhotos || []);
   } catch (err) {
+    console.error("Saved photos error:", err);
     res.status(500).json({ 
       message: "Failed to fetch saved photos", 
-      error: err.message 
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
