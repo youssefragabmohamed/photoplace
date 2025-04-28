@@ -36,6 +36,7 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
   portfolio: [{
+    photoId: { type: mongoose.Schema.Types.ObjectId, ref: 'Photo' }, // Updated field
     url: String,
     title: String,
     description: String

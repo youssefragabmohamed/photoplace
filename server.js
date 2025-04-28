@@ -59,7 +59,7 @@ const corsOptions = {
     }
   },
   credentials: true, // Allow cookies and credentials
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allowed HTTP methods
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // Add PATCH here
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'], // Allowed headers
   optionsSuccessStatus: 200 // For legacy browsers
 };
@@ -608,6 +608,67 @@ app.get("/api/photos/saved", authMiddleware, async (req, res) => {
 
 // Use user routes
 app.use('/api/users', userRoutes);
+
+// Update profile route (including profile picture)
+app.patch("/api/profile/update/:userId", authMiddleware, upload.single('profilePic'), async (req, res) => {
+  try {
+    const updates = {};
+    
+    if (req.file) {
+      updates.profilePic = `https://${req.get('host')}/uploads/${req.file.filename}`;
+    }
+    if (req.body.bio) updates.bio = req.body.bio;
+    if (req.body.link) updates.link = req.body.link;
+    if (req.body.portfolioTitle) updates.portfolioTitle = req.body.portfolioTitle;
+    if (req.body.portfolioDescription) updates.portfolioDescription = req.body.portfolioDescription;
+
+    const user = await User.findByIdAndUpdate(
+      req.params.userId,
+      updates,
+      { new: true }
+    ).select('-password');
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.status(200).json(user);
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to update profile", 
+      error: err.message 
+    });
+  }
+});
+
+// Add to portfolio
+app.post("/api/profile/portfolio/:photoId", authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.photoId);
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Check if already in portfolio
+    if (user.portfolio.some(item => item.photoId.equals(photo._id))) {
+      return res.status(400).json({ message: "Photo already in portfolio" });
+    }
+
+    user.portfolio.push({
+      photoId: photo._id,
+      url: photo.url,
+      title: photo.title,
+      description: photo.description || ""
+    });
+
+    await user.save();
+    res.status(200).json(user);
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to add to portfolio", 
+      error: err.message 
+    });
+  }
+});
 
 // Enhanced Error Handling
 app.use((req, res) => res.status(404).json({ 
