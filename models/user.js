@@ -5,53 +5,95 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    trim: true
+    trim: true,
+    minlength: 3,
+    maxlength: 30
   },
   email: {
     type: String,
     required: true,
     unique: true,
     trim: true,
-    lowercase: true
+    lowercase: true,
+    validate: {
+      validator: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+      message: props => `${props.value} is not a valid email!`
+    }
   },
   password: {
     type: String,
-    required: true
+    required: true,
+    minlength: 8
   },
   fullName: {
     type: String,
-    trim: true
+    trim: true,
+    maxlength: 50
   },
   bio: {
     type: String,
     trim: true,
-    maxlength: 500
+    maxlength: 500,
+    default: ''
   },
   link: {
     type: String,
-    trim: true
+    trim: true,
+    validate: {
+      validator: v => /^https?:\/\/.+\..+/.test(v),
+      message: props => `${props.value} is not a valid URL!`
+    }
   },
   location: {
     type: String,
-    trim: true
+    trim: true,
+    maxlength: 50
   },
   portfolio: [{
-    photoId: { type: mongoose.Schema.Types.ObjectId, ref: 'Photo' }, // Updated field
-    url: String,
-    title: String,
-    description: String
+    photoId: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: 'Photo',
+      required: true 
+    },
+    url: { 
+      type: String, 
+      required: true,
+      validate: {
+        validator: v => /^https?:\/\/.+\..+/.test(v),
+        message: props => `${props.value} is not a valid URL!`
+      }
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 500
+    }
   }],
   portfolioTitle: {
     type: String,
-    default: 'My Portfolio'
+    default: 'My Portfolio',
+    trim: true,
+    maxlength: 100
   },
   portfolioDescription: {
     type: String,
-    default: ''
+    default: '',
+    trim: true,
+    maxlength: 500
   },
   profilePic: {
     type: String,
-    default: '/default-profile.jpg'
+    default: '/default-profile.jpg',
+    validate: {
+      validator: v => /^https?:\/\/.+\..+/.test(v) || v.startsWith('/'),
+      message: props => `${props.value} is not a valid image path!`
+    }
   },
   followers: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -67,28 +109,45 @@ const userSchema = new mongoose.Schema({
   }],
   createdAt: {
     type: Date,
+    default: Date.now,
+    immutable: true
+  },
+  updatedAt: {
+    type: Date,
     default: Date.now
   }
 }, {
   toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  toObject: { virtuals: true },
+  timestamps: true
 });
 
-// Virtual population for photos
+// Update timestamp on save
+userSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+// Virtuals
 userSchema.virtual('photos', {
   ref: 'Photo',
   localField: '_id',
   foreignField: 'userId'
 });
 
-// Virtual for followers count
 userSchema.virtual('followersCount').get(function() {
   return this.followers.length;
 });
 
-// Virtual for following count
 userSchema.virtual('followingCount').get(function() {
   return this.following.length;
+});
+
+userSchema.virtual('photosCount', {
+  ref: 'Photo',
+  localField: '_id',
+  foreignField: 'userId',
+  count: true
 });
 
 module.exports = mongoose.model('User', userSchema);

@@ -312,11 +312,6 @@ app.post("/api/auth/login", async (req, res) => {
 // Photo Upload with enhanced error handling
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
-    console.log("File:", req.file);
-    console.log("Title:", req.body.title);
-    console.log("Location:", req.body.location);
-    console.log("User ID:", req.userId);
-
     if (!req.file) {
       return res.status(400).json({ 
         message: "No file uploaded",
@@ -345,14 +340,18 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       description: req.body.description || "",
       url: photoUrl,
       userId: req.userId,
-      location: req.body.location || 'digital' // Default to digital if not provided
+      location: req.body.location || 'digital'
     });
 
     await photo.save();
     
+    // Populate user data in the response
+    const populatedPhoto = await Photo.findById(photo._id)
+      .populate('userId', 'username profilePic');
+    
     res.status(201).json({ 
       success: true,
-      photo,
+      photo: populatedPhoto,
       message: "Photo uploaded successfully"
     });
   } catch (err) {
@@ -581,22 +580,23 @@ app.post("/api/photos/save/:photoId", authMiddleware, async (req, res) => {
 // Get Saved Photos Route
 app.get("/api/photos/saved", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).populate({
-      path: 'savedPhotos',
-      populate: {
-        path: 'userId',
-        select: 'username profilePic'
-      }
-    });
+    const user = await User.findById(req.userId)
+      .populate({
+        path: 'savedPhotos',
+        populate: {
+          path: 'userId',
+          select: 'username profilePic'
+        }
+      });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
     
-    if (!user) return res.status(404).json({ message: "User not found" });
-    
-    // Return empty array if no saved photos
     res.status(200).json(user.savedPhotos || []);
   } catch (err) {
-    console.error("Saved photos error:", err);
     res.status(500).json({ 
-      message: "Failed to fetch saved photos", 
+      message: "Failed to fetch saved photos",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
@@ -639,10 +639,19 @@ app.patch("/api/profile/update/:userId", authMiddleware, upload.single('profileP
 app.post("/api/profile/portfolio/:photoId", authMiddleware, async (req, res) => {
   try {
     const photo = await Photo.findById(req.params.photoId);
-    if (!photo) return res.status(404).json({ message: "Photo not found" });
+    if (!photo) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
 
     const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check ownership
+    if (!photo.userId.equals(req.userId)) {
+      return res.status(403).json({ message: "You can only add your own photos to portfolio" });
+    }
 
     // Check if already in portfolio
     if (user.portfolio.some(item => item.photoId.equals(photo._id))) {
@@ -657,7 +666,15 @@ app.post("/api/profile/portfolio/:photoId", authMiddleware, async (req, res) => 
     });
 
     await user.save();
-    res.status(200).json(user);
+    
+    // Return updated user with populated portfolio
+    const updatedUser = await User.findById(req.userId)
+      .populate({
+        path: 'portfolio.photoId',
+        select: 'title url description'
+      });
+    
+    res.status(200).json(updatedUser);
   } catch (err) {
     res.status(500).json({ 
       message: "Failed to add to portfolio", 
@@ -665,6 +682,29 @@ app.post("/api/profile/portfolio/:photoId", authMiddleware, async (req, res) => 
     });
   }
 });
+
+// Remove from portfolio
+app.delete("/api/profile/portfolio/:photoId", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.portfolio = user.portfolio.filter(
+      item => !item.photoId.equals(req.params.photoId)
+    );
+
+    await user.save();
+    res.status(200).json({ message: "Removed from portfolio" });
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to remove from portfolio", 
+      error: err.message 
+    });
+  }
+});
+
 
 // Enhanced Error Handling
 app.use((req, res) => res.status(404).json({ 
