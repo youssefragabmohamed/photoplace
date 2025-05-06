@@ -50,7 +50,6 @@ console.log("Allowed Origins:", allowedOrigins);
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -58,14 +57,17 @@ const corsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true, // Allow cookies and credentials
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // Add PATCH here
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'], // Allowed headers
-  optionsSuccessStatus: 200 // For legacy browsers
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Explicitly handle OPTIONS requests
+app.options('*', cors(corsOptions));
 
 // Enhanced Security Middleware
 app.use(helmet({
@@ -151,7 +153,9 @@ app.get('/healthcheck', (req, res) => {
 
 // Auth Middleware
 const authMiddleware = (req, res, next) => {
-  if (req.method === 'OPTIONS') return next();
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
   
   const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ message: "Authentication required" });
