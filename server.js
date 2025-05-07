@@ -58,15 +58,15 @@ const corsOptions = {
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  optionsSuccessStatus: 200
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // Include OPTIONS
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'], // Allowed headers
+  optionsSuccessStatus: 200 // For legacy browsers
 };
 
-// Apply CORS middleware
+// Apply CORS middleware to all routes
 app.use(cors(corsOptions));
 
-// Explicitly handle OPTIONS requests
+// Explicit preflight handling
 app.options('*', cors(corsOptions));
 
 // Enhanced Security Middleware
@@ -225,15 +225,25 @@ app.get("/api/profile/:userId", authMiddleware, async (req, res) => {
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
+    
+    // Validate input
     if (!username || !email || !password) {
-      return res.status(400).json({ message: "All fields required" });
+      return res.status(400).json({ 
+        success: false,
+        message: "All fields required" 
+      });
     }
 
+    // Check for existing user
     const existingUser = await User.findOne({ $or: [{ username }, { email }] });
     if (existingUser) {
-      return res.status(409).json({ message: "User already exists" });
+      return res.status(409).json({ 
+        success: false,
+        message: "User already exists" 
+      });
     }
 
+    // Create new user
     const user = new User({
       username,
       email,
@@ -242,8 +252,12 @@ app.post("/api/auth/signup", async (req, res) => {
 
     await user.save();
 
-    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    // Generate token
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { 
+      expiresIn: '7d' 
+    });
     
+    // Set cookie
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -252,16 +266,22 @@ app.post("/api/auth/signup", async (req, res) => {
       domain: process.env.COOKIE_DOMAIN || '.onrender.com'
     });
 
+    // Send response
     res.status(201).json({ 
+      success: true,
       token, 
       user: { 
         _id: user._id, 
         username: user.username, 
         email: user.email 
-      } 
+      },
+      message: "Registration successful"
     });
+    
   } catch (err) {
+    console.error("Signup error:", err);
     res.status(500).json({ 
+      success: false,
       message: "Registration failed", 
       error: err.message,
       stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
