@@ -42,7 +42,7 @@ process.on('SIGINT', async () => {
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) 
   : [
-      "https://frontendphotoplace.vercel.app", // Frontend domain
+      "https://frontend-photoplace.vercel.app", // Corrected URL with hyphen
       "http://localhost:3000" // Local development
     ];
 
