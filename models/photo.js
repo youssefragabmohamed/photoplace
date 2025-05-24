@@ -16,8 +16,11 @@ const photoSchema = new mongoose.Schema({
     type: String, 
     required: true,
     validate: {
-      validator: v => /^https?:\/\/.+\..+/.test(v),
-      message: props => `${props.value} is not a valid URL!`
+      validator: function(v) {
+        // Accept both relative paths (/uploads/) and full URLs (http/https)
+        return /^(\/uploads\/|https?:\/\/).*/.test(v);
+      },
+      message: props => `${props.value} is not a valid URL or path! Must start with /uploads/ or http:// or https://`
     }
   },
   userId: { 
