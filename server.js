@@ -336,6 +336,10 @@ app.post("/api/auth/login", async (req, res) => {
 // Photo Upload with enhanced error handling
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
+    console.log('Upload request received - File:', req.file);
+    console.log('Upload request received - Body:', req.body);
+
+    // Check if a file was uploaded
     if (!req.file) {
       return res.status(400).json({ 
         message: "No file uploaded",
@@ -345,9 +349,10 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       });
     }
 
+    // Ensure required fields are present
     if (!req.body.title) {
       try {
-        if (req.file) fs.unlinkSync(req.file.path);
+        if (req.file) fs.unlinkSync(req.file.path); // Cleanup uploaded file if title is missing
       } catch (cleanupErr) {
         console.error("Cleanup error:", cleanupErr);
       }
@@ -357,14 +362,19 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
       });
     }
 
-    const photoUrl = `https://${req.get('host')}/uploads/${req.file.filename}`;
+    // Parse other fields from the form data
+    const { title, description, location } = req.body;
     
+    // Generate the photo URL
+    const photoUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    
+    // Create a new photo document
     const photo = new Photo({
-      title: req.body.title,
-      description: req.body.description || "",
+      title,
+      description: description || "",
       url: photoUrl,
       userId: req.userId,
-      location: req.body.location || 'digital'
+      location: location || 'digital'
     });
 
     await photo.save();
@@ -381,6 +391,7 @@ app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (re
   } catch (err) {
     console.error("Upload Error:", err);
     
+    // Cleanup the uploaded file in case of an error
     try {
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
@@ -619,6 +630,7 @@ app.get("/api/photos/saved", authMiddleware, async (req, res) => {
     
     res.status(200).json(user.savedPhotos || []);
   } catch (err) {
+    console.error("Saved photos error:", err);
     res.status(500).json({ 
       message: "Failed to fetch saved photos",
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
