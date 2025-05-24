@@ -336,74 +336,43 @@ app.post("/api/auth/login", async (req, res) => {
 // Photo Upload with enhanced error handling
 app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
   try {
-    console.log('Upload request received - File:', req.file);
-    console.log('Upload request received - Body:', req.body);
-
     // Check if a file was uploaded
     if (!req.file) {
-      return res.status(400).json({ 
-        message: "No file uploaded",
-        details: {
-          allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
-        }
-      });
+      return res.status(400).json({ message: "No file uploaded" });
     }
 
-    // Ensure required fields are present
+    // Validate that the title exists
     if (!req.body.title) {
-      try {
-        if (req.file) fs.unlinkSync(req.file.path); // Cleanup uploaded file if title is missing
-      } catch (cleanupErr) {
-        console.error("Cleanup error:", cleanupErr);
-      }
-      return res.status(400).json({ 
-        message: "Title is required",
-        details: "Include a title in your form data"
-      });
+      fs.unlinkSync(req.file.path); // Cleanup the uploaded file
+      return res.status(400).json({ message: "Title is required" });
     }
 
-    // Parse other fields from the form data
-    const { title, description, location } = req.body;
-    
     // Generate the photo URL
-    const photoUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-    
+    const photoUrl = `/uploads/${req.file.filename}`;
+
     // Create a new photo document
     const photo = new Photo({
-      title,
-      description: description || "",
+      title: req.body.title,
+      description: req.body.description || "",
       url: photoUrl,
       userId: req.userId,
-      location: location || 'digital'
+      location: req.body.location || 'digital'
     });
 
     await photo.save();
-    
-    // Populate user data in the response
-    const populatedPhoto = await Photo.findById(photo._id)
-      .populate('userId', 'username profilePic');
-    
-    res.status(201).json({ 
-      success: true,
-      photo: populatedPhoto,
-      message: "Photo uploaded successfully"
-    });
+
+    // Send the response
+    res.status(201).json(photo);
   } catch (err) {
-    console.error("Upload Error:", err);
-    
     // Cleanup the uploaded file in case of an error
-    try {
-      if (req.file && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
-      }
-    } catch (cleanupErr) {
-      console.error("File cleanup failed:", cleanupErr);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
     }
 
+    console.error("Upload error:", err);
     res.status(500).json({ 
-      message: "Upload failed", 
-      error: err.message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      message: "Upload failed",
+      error: err.message 
     });
   }
 });
@@ -414,13 +383,13 @@ app.get("/api/photos", authMiddleware, async (req, res) => {
     const photos = await Photo.find({})
       .populate('userId', 'username profilePic')
       .sort({ createdAt: -1 });
-    
+
     res.status(200).json(photos || []);
   } catch (err) {
     console.error("Photos error:", err);
     res.status(500).json({
       message: "Failed to fetch photos",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: err.message // Include actual error
     });
   }
 });
@@ -625,6 +594,7 @@ app.get("/api/photos/saved", authMiddleware, async (req, res) => {
       });
 
     if (!user) {
+      console.error(`Saved photos error: User with ID ${req.userId} not found`);
       return res.status(404).json({ message: "User not found" });
     }
     
@@ -633,7 +603,7 @@ app.get("/api/photos/saved", authMiddleware, async (req, res) => {
     console.error("Saved photos error:", err);
     res.status(500).json({ 
       message: "Failed to fetch saved photos",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: err.message // Include actual error
     });
   }
 });
