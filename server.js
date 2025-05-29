@@ -105,47 +105,41 @@ app.use((req, res, next) => {
   next();
 });
 
-// File Upload Configuration with better error handling
-const uploadsDir = path.join(process.cwd(), "uploads");
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
-  try {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log("✅ Created uploads directory");
-  } catch (err) {
-    console.error("❌ Failed to create uploads directory:", err);
-    process.exit(1);
-  }
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// File Upload Configuration without file size limitations
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-      const safeName = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.]/g, '-')}`;
-      cb(null, safeName);
-    }
-  }),
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Invalid file type. Only ${allowedTypes.join(', ')} are allowed`), false);
-    }
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-// Serve static files with proper CORS headers
-app.use('/uploads', express.static(uploadsDir, {
-  setHeaders: (res, path) => {
-    res.set('Access-Control-Allow-Origin', allowedOrigins.join(', '));
-    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+    if (!allowedTypes.includes(file.mimetype)) {
+      const error = new Error('Invalid file type. Only JPEG, PNG and GIF are allowed.');
+      error.code = 'INVALID_FILE_TYPE';
+      return cb(error, false);
+    }
+    cb(null, true);
   }
-}));
+});
 
 // Health check endpoint
 app.get('/healthcheck', (req, res) => {
@@ -480,7 +474,7 @@ app.use((err, req, res, next) => {
   if (err.message.includes('Invalid file type')) {
     return res.status(415).json({ 
       message: "Invalid file type",
-      allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+      allowedTypes: ['image/jpeg', 'image/png', 'image/gif']
     });
   }
 
