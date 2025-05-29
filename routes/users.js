@@ -5,6 +5,40 @@ const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configure multer for profile picture uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'profile-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+    if (!allowedTypes.includes(file.mimetype)) {
+      const error = new Error('Invalid file type. Only JPEG, PNG and GIF are allowed.');
+      error.code = 'INVALID_FILE_TYPE';
+      return cb(error, false);
+    }
+    cb(null, true);
+  }
+});
 
 // Get current user's profile with populated data
 router.get('/me', authMiddleware, async (req, res) => {
@@ -239,6 +273,44 @@ router.get('/profile', authMiddleware, async (req, res) => {
 router.post('/logout', (req, res) => {
     res.clearCookie('token');
     res.json({ message: 'Logged out successfully' });
+});
+
+// Update profile picture
+router.post('/update-pic', authMiddleware, upload.single('profilePic'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Delete old profile picture if it exists
+    if (user.profilePic) {
+      const oldPicPath = path.join(process.cwd(), user.profilePic.replace(/^\//, ''));
+      if (fs.existsSync(oldPicPath)) {
+        fs.unlinkSync(oldPicPath);
+      }
+    }
+
+    // Update user's profile picture path
+    const profilePicPath = '/uploads/' + req.file.filename;
+    user.profilePic = profilePicPath;
+    await user.save();
+
+    res.status(200).json({
+      message: "Profile picture updated successfully",
+      profilePic: profilePicPath
+    });
+  } catch (err) {
+    console.error('Profile picture update error:', err);
+    res.status(500).json({ 
+      message: "Failed to update profile picture", 
+      error: err.message 
+    });
+  }
 });
 
 module.exports = router;
