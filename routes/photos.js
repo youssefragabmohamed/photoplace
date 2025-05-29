@@ -11,26 +11,44 @@ const authMiddleware = require('../middleware/auth');
 const uploadsDir = path.join(process.cwd(), "uploads");
 try {
   if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true, mode: 0o755 });
-    console.log("✅ Created uploads directory:", uploadsDir);
+    // Create directory with full permissions
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    // Explicitly set permissions after creation
+    fs.chmodSync(uploadsDir, 0o777);
+    console.log("✅ Created uploads directory with full permissions:", uploadsDir);
+  } else {
+    // Ensure existing directory has correct permissions
+    fs.chmodSync(uploadsDir, 0o777);
+    console.log("✅ Updated uploads directory permissions:", uploadsDir);
   }
 } catch (err) {
-  console.error("❌ Failed to create uploads directory:", err);
-  // Don't exit process, let individual requests handle the error
+  console.error("❌ Failed to create/update uploads directory:", err);
 }
 
-// Multer configuration with error handling
+// Multer configuration with enhanced error handling
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Check if directory exists before trying to save
-    if (!fs.existsSync(uploadsDir)) {
-      return cb(new Error("Uploads directory not available"));
+    // Double check directory exists and is writable
+    try {
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.chmodSync(uploadsDir, 0o777);
+      }
+      // Test write permissions
+      fs.accessSync(uploadsDir, fs.constants.W_OK);
+      cb(null, uploadsDir);
+    } catch (err) {
+      console.error("❌ Upload directory error:", err);
+      cb(new Error("Upload directory is not writable"));
     }
-    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const safeName = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.]/g, '-')}`;
-    cb(null, safeName);
+    try {
+      const safeName = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.]/g, '-')}`;
+      cb(null, safeName);
+    } catch (err) {
+      cb(new Error("Failed to generate safe filename"));
+    }
   }
 });
 
@@ -77,20 +95,59 @@ router.get('/', authMiddleware, async (req, res) => {
 });
 
 // Upload photo with enhanced error handling
-router.post('/upload', authMiddleware, upload.single('photo'), async (req, res) => {
+router.post('/upload', authMiddleware, (req, res, next) => {
+  console.log('Starting upload process...');
+  upload.single('photo')(req, res, (err) => {
+    if (err) {
+      console.error('Multer error:', err);
+      return res.status(400).json({
+        message: err.message || "File upload failed",
+        error: err
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
+    // Log the full request details
     console.log('Upload request received:', {
-      file: req.file ? 'present' : 'missing',
-      body: req.body
+      file: req.file ? {
+        filename: req.file.filename,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        path: req.file.path
+      } : 'missing',
+      body: req.body,
+      userId: req.userId
     });
 
     if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
+      return res.status(400).json({ 
+        message: "No file uploaded",
+        details: "The request must include a file in the 'photo' field"
+      });
+    }
+
+    // Verify file exists on disk
+    try {
+      await fs.promises.access(req.file.path, fs.constants.F_OK);
+      console.log('File successfully saved to disk:', req.file.path);
+    } catch (err) {
+      throw new Error(`File was not properly saved to disk: ${err.message}`);
     }
 
     if (!req.body.title) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ message: "Title is required" });
+      // Clean up the uploaded file
+      try {
+        fs.unlinkSync(req.file.path);
+        console.log('Cleaned up file due to missing title');
+      } catch (unlinkErr) {
+        console.error("Failed to clean up file after title validation:", unlinkErr);
+      }
+      return res.status(400).json({ 
+        message: "Title is required",
+        details: "Please provide a title for the photo"
+      });
     }
 
     const photoUrl = `/uploads/${req.file.filename}`;
@@ -104,29 +161,53 @@ router.post('/upload', authMiddleware, upload.single('photo'), async (req, res) 
       location: req.body.location || 'digital'
     });
 
+    // Log the photo object before saving
+    console.log('Attempting to save photo:', JSON.stringify(photo, null, 2));
+
     const savedPhoto = await photo.save();
     console.log('Photo saved to database:', savedPhoto._id);
 
     const populatedPhoto = await Photo.findById(savedPhoto._id)
       .populate('userId', 'username profilePic');
 
-    res.status(201).json({ photo: populatedPhoto });
+    // Log successful upload
+    console.log('Upload completed successfully:', {
+      photoId: savedPhoto._id,
+      url: photoUrl,
+      userId: req.userId
+    });
+
+    res.status(201).json({ 
+      photo: populatedPhoto,
+      message: "Photo uploaded successfully"
+    });
   } catch (err) {
-    console.error("Upload error:", err);
+    console.error("Upload error details:", {
+      error: err.message,
+      stack: err.stack,
+      userId: req?.userId,
+      file: req?.file
+    });
     
     // Cleanup uploaded file if it exists
-    if (req.file && fs.existsSync(req.file.path)) {
+    if (req.file && req.file.path) {
       try {
         fs.unlinkSync(req.file.path);
+        console.log("Cleaned up uploaded file after error");
       } catch (unlinkErr) {
         console.error("Failed to cleanup uploaded file:", unlinkErr);
       }
     }
 
+    // Send detailed error response
     res.status(500).json({ 
       message: "Upload failed",
       error: err.message,
-      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      details: process.env.NODE_ENV === 'development' ? {
+        stack: err.stack,
+        path: req?.file?.path,
+        userId: req?.userId
+      } : undefined
     });
   }
 });
