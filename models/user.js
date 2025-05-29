@@ -124,6 +124,12 @@ const userSchema = new mongoose.Schema({
 
 // Update timestamp on save
 userSchema.pre('save', function(next) {
+  // Initialize arrays if they don't exist
+  if (!this.followers) this.followers = [];
+  if (!this.following) this.following = [];
+  if (!this.savedPhotos) this.savedPhotos = [];
+  
+  // Update timestamp
   this.updatedAt = Date.now();
   next();
 });
@@ -136,11 +142,11 @@ userSchema.virtual('photos', {
 });
 
 userSchema.virtual('followersCount').get(function() {
-  return this.followers.length;
+  return this.followers ? this.followers.length : 0;
 });
 
 userSchema.virtual('followingCount').get(function() {
-  return this.following.length;
+  return this.following ? this.following.length : 0;
 });
 
 userSchema.virtual('photosCount', {

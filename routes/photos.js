@@ -167,8 +167,32 @@ router.post('/upload', authMiddleware, (req, res, next) => {
     const savedPhoto = await photo.save();
     console.log('Photo saved to database:', savedPhoto._id);
 
+    // Populate user data more carefully
     const populatedPhoto = await Photo.findById(savedPhoto._id)
-      .populate('userId', 'username profilePic');
+      .populate({
+        path: 'userId',
+        select: 'username profilePic followers following savedPhotos',
+        options: { lean: true }
+      })
+      .lean();
+
+    if (!populatedPhoto) {
+      throw new Error('Failed to retrieve saved photo');
+    }
+
+    // Ensure arrays exist
+    if (!populatedPhoto.userId) {
+      populatedPhoto.userId = { username: 'Unknown', profilePic: '/default-profile.jpg' };
+    }
+    
+    // Add counts manually to avoid virtual field issues
+    populatedPhoto.userId.followersCount = populatedPhoto.userId.followers?.length || 0;
+    populatedPhoto.userId.followingCount = populatedPhoto.userId.following?.length || 0;
+
+    // Remove arrays from response to avoid undefined length issues
+    delete populatedPhoto.userId.followers;
+    delete populatedPhoto.userId.following;
+    delete populatedPhoto.userId.savedPhotos;
 
     // Log successful upload
     console.log('Upload completed successfully:', {
