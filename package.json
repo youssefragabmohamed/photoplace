@@ -1,14 +1,14 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "db.js",
+  "description": "Backend API for the photo marketplace application",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
-    "build": "npm install --omit=dev && npm run yourBuildCommandHere"
+    "dev": "nodemon server.js",
+    "build": "npm install --omit=dev"
   },
-  "keywords": [],
+  "keywords": ["photo", "marketplace", "api", "express", "mongodb"],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -24,5 +24,8 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "rate-limiter": "^0.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   }
 }

@@ -16,10 +16,14 @@ const Photo = require("./models/photo.js");
 const User = require("./models/user.js");
 
 // Import user routes
-const userRoutes = require('./routes/users');
+const userRoutes = require('./Routes/users');
+const photoRoutes = require('./Routes/photos');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Connect to MongoDB
+connectDB().catch(console.error);
 
 // Validate required environment variables
 const requiredEnvVars = ['JWT_SECRET', 'MONGODB_URI'];
@@ -200,20 +204,29 @@ app.post("/api/auth/logout", authMiddleware, (req, res) => {
   }
 });
 
-// Profile Endpoint (NEW)
+// Profile Endpoint (UPDATED)
 app.get("/api/profile/:userId", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId).select('-password');
-    if (!user) return res.status(404).json({ message: "User not found" });
+    const user = await User.findById(req.params.userId)
+      .select('-password')
+      .lean();
+      
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
     
-    const photos = await Photo.find({ userId: req.params.userId });
+    const photos = await Photo.find({ userId: req.params.userId })
+      .sort({ createdAt: -1 })
+      .lean();
     
     res.status(200).json({
       user,
-      photosCount: photos.length,
+      photos: photos || [],
+      photosCount: photos ? photos.length : 0,
       joined: user.createdAt
     });
   } catch (err) {
+    console.error("Profile error:", err);
     res.status(500).json({ 
       message: "Failed to fetch profile", 
       error: err.message 
@@ -333,283 +346,9 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Photo Upload with enhanced error handling
-app.post("/api/photos/upload", authMiddleware, upload.single('photo'), async (req, res) => {
-  try {
-    // Check if a file was uploaded
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
-    }
-
-    // Validate that the title exists
-    if (!req.body.title) {
-      fs.unlinkSync(req.file.path); // Cleanup the uploaded file
-      return res.status(400).json({ message: "Title is required" });
-    }
-
-    // Generate the photo URL
-    const photoUrl = `/uploads/${req.file.filename}`;
-
-    // Create a new photo document
-    const photo = new Photo({
-      title: req.body.title,
-      description: req.body.description || "",
-      url: photoUrl,
-      userId: req.userId,
-      location: req.body.location || 'digital'
-    });
-
-    await photo.save();
-
-    // Send the response
-    res.status(201).json(photo);
-  } catch (err) {
-    // Cleanup the uploaded file in case of an error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-
-    console.error("Upload error:", err);
-    res.status(500).json({ 
-      message: "Upload failed",
-      error: err.message 
-    });
-  }
-});
-
-// Get all photos for gallery with optional location filter
-app.get("/api/photos", authMiddleware, async (req, res) => {
-  try {
-    const photos = await Photo.find({})
-      .populate('userId', 'username profilePic')
-      .sort({ createdAt: -1 });
-
-    res.status(200).json(photos || []);
-  } catch (err) {
-    console.error("Photos error:", err);
-    res.status(500).json({
-      message: "Failed to fetch photos",
-      error: err.message // Include actual error
-    });
-  }
-});
-
-// Get photos by user ID with optional location filter
-app.get("/api/photos/user/:userId", authMiddleware, async (req, res) => {
-  try {
-    const query = { userId: req.params.userId };
-    
-    // Add location filter if provided in query params
-    if (req.query.location) {
-      query.location = req.query.location;
-    }
-
-    const photos = await Photo.find(query)
-      .populate('userId', 'username profilePic')
-      .sort({ createdAt: -1 });
-
-    res.status(200).json(photos);
-  } catch (err) {
-    res.status(500).json({
-      message: "Failed to fetch user photos",
-      error: err.message
-    });
-  }
-});
-
-// Follow User Route
-app.post("/api/follow/:userId", authMiddleware, async (req, res) => {
-  try {
-    const targetUser = await User.findById(req.params.userId);
-    if (!targetUser) return res.status(404).json({ message: "User not found" });
-
-    const currentUser = await User.findById(req.userId);
-    if (targetUser._id.equals(currentUser._id)) {
-      return res.status(400).json({ message: "You cannot follow yourself" });
-    }
-
-    // Add user to followers and following
-    if (!targetUser.followers.includes(currentUser._id)) {
-      targetUser.followers.push(currentUser._id);
-      currentUser.following.push(targetUser._id);
-
-      await targetUser.save();
-      await currentUser.save();
-
-      res.status(200).json({ message: "Followed user successfully" });
-    } else {
-      res.status(400).json({ message: "Already following this user" });
-    }
-  } catch (err) {
-    res.status(500).json({ message: "Failed to follow user", error: err.message });
-  }
-});
-
-// Unfollow User Route
-app.post("/api/unfollow/:userId", authMiddleware, async (req, res) => {
-  try {
-    const targetUser = await User.findById(req.params.userId);
-    if (!targetUser) return res.status(404).json({ message: "User not found" });
-
-    const currentUser = await User.findById(req.userId);
-
-    // Remove user from followers and following
-    if (targetUser.followers.includes(currentUser._id)) {
-      targetUser.followers = targetUser.followers.filter(id => !id.equals(currentUser._id));
-      currentUser.following = currentUser.following.filter(id => !id.equals(targetUser._id));
-
-      await targetUser.save();
-      await currentUser.save();
-
-      res.status(200).json({ message: "Unfollowed user successfully" });
-    } else {
-      res.status(400).json({ message: "You are not following this user" });
-    }
-  } catch (err) {
-    res.status(500).json({ message: "Failed to unfollow user", error: err.message });
-  }
-});
-
-// Profile Endpoint (with following and followers count)
-app.get("/api/profile/:userId", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.userId).select('-password');
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    const photos = await Photo.find({ userId: req.params.userId });
-
-    const isFollowing = user.followers.includes(req.userId);
-
-    res.status(200).json({
-      user,
-      isFollowing,
-      followersCount: user.followers.length,
-      followingCount: user.following.length,
-      photosCount: photos.length,
-      joined: user.createdAt
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to fetch profile", error: err.message });
-  }
-});
-
-// Delete Photo by ID
-app.delete("/api/photos/:photoId", authMiddleware, async (req, res) => {
-  try {
-    const photo = await Photo.findOneAndDelete({ 
-      _id: req.params.photoId,
-      userId: req.userId // Ensure user can only delete their own photos
-    });
-
-    if (!photo) {
-      return res.status(404).json({ message: "Photo not found or unauthorized" });
-    }
-
-    // Delete the actual file from uploads directory
-    try {
-      const filename = photo.url.split('/').pop();
-      const filePath = path.join(uploadsDir, filename);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (fileErr) {
-      console.error("File deletion error:", fileErr);
-    }
-
-    res.status(200).json({ message: "Photo deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ 
-      message: "Failed to delete photo", 
-      error: err.message 
-    });
-  }
-});
-
-// Get single photo by ID
-app.get("/api/photos/:photoId", authMiddleware, async (req, res) => {
-  try {
-    const photo = await Photo.findById(req.params.photoId)
-      .populate('userId', 'username profilePic');
-    
-    if (!photo) {
-      return res.status(404).json({ message: "Photo not found" });
-    }
-
-    res.status(200).json(photo);
-  } catch (err) {
-    res.status(500).json({
-      message: "Failed to fetch photo",
-      error: err.message
-    });
-  }
-});
-
-// Save Photo Route
-app.post("/api/photos/save/:photoId", authMiddleware, async (req, res) => {
-  try {
-    const photo = await Photo.findById(req.params.photoId);
-    if (!photo) return res.status(404).json({ message: "Photo not found" });
-
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    // Check if already saved
-    const alreadySaved = user.savedPhotos.includes(photo._id);
-    
-    if (alreadySaved) {
-      // Remove from saved
-      user.savedPhotos = user.savedPhotos.filter(id => !id.equals(photo._id));
-      await user.save();
-      return res.status(200).json({ 
-        message: "Photo removed from saved", 
-        isSaved: false 
-      });
-    } else {
-      // Add to saved
-      user.savedPhotos.push(photo._id);
-      await user.save();
-      return res.status(200).json({ 
-        message: "Photo saved successfully", 
-        isSaved: true 
-      });
-    }
-  } catch (err) {
-    res.status(500).json({ 
-      message: "Failed to save photo", 
-      error: err.message 
-    });
-  }
-});
-
-// Get Saved Photos Route
-app.get("/api/photos/saved", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.userId)
-      .populate({
-        path: 'savedPhotos',
-        populate: {
-          path: 'userId',
-          select: 'username profilePic'
-        }
-      });
-
-    if (!user) {
-      console.error(`Saved photos error: User with ID ${req.userId} not found`);
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    res.status(200).json(user.savedPhotos || []);
-  } catch (err) {
-    console.error("Saved photos error:", err);
-    res.status(500).json({ 
-      message: "Failed to fetch saved photos",
-      error: err.message // Include actual error
-    });
-  }
-});
-
-// Use user routes
+// Use routes
 app.use('/api/users', userRoutes);
+app.use('/api/photos', photoRoutes);
 
 // Update profile route (including profile picture)
 app.patch("/api/profile/update/:userId", authMiddleware, upload.single('profilePic'), async (req, res) => {
@@ -710,7 +449,6 @@ app.delete("/api/profile/portfolio/:photoId", authMiddleware, async (req, res) =
     });
   }
 });
-
 
 // Enhanced Error Handling
 app.use((req, res) => res.status(404).json({ 
