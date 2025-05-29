@@ -347,7 +347,7 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // Use routes
-app.use('/api/users', userRoutes);
+app.use('/api/auth', userRoutes);
 app.use('/api/photos', photoRoutes);
 
 // Update profile route (including profile picture)
