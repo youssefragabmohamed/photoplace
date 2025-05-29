@@ -288,15 +288,15 @@ router.post('/update-pic', authMiddleware, upload.single('profilePic'), async (r
     }
 
     // Delete old profile picture if it exists
-    if (user.profilePic) {
-      const oldPicPath = path.join(process.cwd(), user.profilePic.replace(/^\//, ''));
+    if (user.profilePic && !user.profilePic.includes('default-profile.jpg')) {
+      const oldPicPath = path.join(process.cwd(), 'uploads', path.basename(user.profilePic));
       if (fs.existsSync(oldPicPath)) {
         fs.unlinkSync(oldPicPath);
       }
     }
 
     // Update user's profile picture path
-    const profilePicPath = '/uploads/' + req.file.filename;
+    const profilePicPath = `/uploads/${req.file.filename}`;
     user.profilePic = profilePicPath;
     await user.save();
 
