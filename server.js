@@ -16,8 +16,8 @@ const Photo = require("./models/photo.js");
 const User = require("./models/user.js");
 
 // Import user routes
-const userRoutes = require('./Routes/users');
-const photoRoutes = require('./Routes/photos');
+const userRoutes = require('./routes/users');
+const photoRoutes = require('./routes/photos');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
