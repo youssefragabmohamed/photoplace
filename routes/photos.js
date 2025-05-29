@@ -7,23 +7,38 @@ const Photo = require('../models/photo');
 const User = require('../models/user');
 const authMiddleware = require('../middleware/auth');
 
-// File Upload Configuration
+// File Upload Configuration with better error handling
 const uploadsDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true, mode: 0o755 });
+    console.log("✅ Created uploads directory:", uploadsDir);
+  }
+} catch (err) {
+  console.error("❌ Failed to create uploads directory:", err);
+  // Don't exit process, let individual requests handle the error
 }
 
-// Multer configuration
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-      const safeName = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.]/g, '-')}`;
-      cb(null, safeName);
+// Multer configuration with error handling
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Check if directory exists before trying to save
+    if (!fs.existsSync(uploadsDir)) {
+      return cb(new Error("Uploads directory not available"));
     }
-  }),
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const safeName = `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9.]/g, '-')}`;
+    cb(null, safeName);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (allowedTypes.includes(file.mimetype)) {
@@ -61,9 +76,14 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Upload photo
+// Upload photo with enhanced error handling
 router.post('/upload', authMiddleware, upload.single('photo'), async (req, res) => {
   try {
+    console.log('Upload request received:', {
+      file: req.file ? 'present' : 'missing',
+      body: req.body
+    });
+
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
     }
@@ -74,6 +94,7 @@ router.post('/upload', authMiddleware, upload.single('photo'), async (req, res) 
     }
 
     const photoUrl = `/uploads/${req.file.filename}`;
+    console.log('Generated photo URL:', photoUrl);
 
     const photo = new Photo({
       title: req.body.title,
@@ -84,18 +105,28 @@ router.post('/upload', authMiddleware, upload.single('photo'), async (req, res) 
     });
 
     const savedPhoto = await photo.save();
-    const populatedPhoto = await Photo.findById(savedPhoto._id).populate('userId', 'username profilePic');
+    console.log('Photo saved to database:', savedPhoto._id);
+
+    const populatedPhoto = await Photo.findById(savedPhoto._id)
+      .populate('userId', 'username profilePic');
 
     res.status(201).json({ photo: populatedPhoto });
   } catch (err) {
+    console.error("Upload error:", err);
+    
+    // Cleanup uploaded file if it exists
     if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkErr) {
+        console.error("Failed to cleanup uploaded file:", unlinkErr);
+      }
     }
 
-    console.error("Upload error:", err);
     res.status(500).json({ 
       message: "Upload failed",
-      error: err.message 
+      error: err.message,
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
