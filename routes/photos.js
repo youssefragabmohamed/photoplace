@@ -75,16 +75,35 @@ router.get('/', authMiddleware, async (req, res) => {
       query.location = req.query.location;
     }
 
-    const photos = await Photo.find(query)
-      .populate('userId', 'username profilePic')
-      .sort({ createdAt: -1 })
-      .lean();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    const [photos, total] = await Promise.all([
+      Photo.find(query)
+        .populate('userId', 'username profilePic')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Photo.countDocuments(query)
+    ]);
 
     if (!photos) {
-      return res.status(200).json([]);
+      return res.status(200).json({
+        photos: [],
+        page,
+        totalPages: 0,
+        hasMore: false
+      });
     }
 
-    res.status(200).json(photos);
+    res.status(200).json({
+      photos,
+      page,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total
+    });
   } catch (err) {
     console.error("Photos error:", err);
     res.status(500).json({
@@ -244,11 +263,25 @@ router.get('/user/:userId', authMiddleware, async (req, res) => {
       query.location = req.query.location;
     }
 
-    const photos = await Photo.find(query)
-      .populate('userId', 'username profilePic')
-      .sort({ createdAt: -1 });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
 
-    res.status(200).json(photos);
+    const [photos, total] = await Promise.all([
+      Photo.find(query)
+        .populate('userId', 'username profilePic')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Photo.countDocuments(query)
+    ]);
+
+    res.status(200).json({
+      photos,
+      page,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total
+    });
   } catch (err) {
     res.status(500).json({
       message: "Failed to fetch user photos",
@@ -260,9 +293,18 @@ router.get('/user/:userId', authMiddleware, async (req, res) => {
 // Get saved photos
 router.get('/saved', authMiddleware, async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
     const user = await User.findById(req.userId)
       .populate({
         path: 'savedPhotos',
+        options: {
+          skip: skip,
+          limit: limit,
+          sort: { createdAt: -1 }
+        },
         populate: {
           path: 'userId',
           select: 'username profilePic'
@@ -273,8 +315,15 @@ router.get('/saved', authMiddleware, async (req, res) => {
       console.error(`Saved photos error: User with ID ${req.userId} not found`);
       return res.status(404).json({ message: "User not found" });
     }
+
+    const total = user.savedPhotos ? user.savedPhotos.length : 0;
     
-    res.status(200).json(user.savedPhotos || []);
+    res.status(200).json({
+      photos: user.savedPhotos || [],
+      page,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total
+    });
   } catch (err) {
     console.error("Saved photos error:", err);
     res.status(500).json({ 
