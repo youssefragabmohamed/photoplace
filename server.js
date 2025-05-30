@@ -18,8 +18,17 @@ const User = require("./models/user.js");
 // Import user routes
 const userRoutes = require('./routes/users');
 const photoRoutes = require('./routes/photos');
+const notificationsRouter = require('./routes/notifications');
 
 const app = express();
+const server = require('http').createServer(app);
+const io = require('socket.io')(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    methods: ["GET", "POST"]
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 
 // Connect to MongoDB
@@ -166,6 +175,50 @@ const authMiddleware = (req, res, next) => {
     res.status(401).json({ message: "Invalid or expired token" });
   }
 };
+
+// Socket.IO connection handling
+const connectedUsers = new Map();
+
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
+
+  // Handle user authentication
+  socket.on('authenticate', (userId) => {
+    connectedUsers.set(userId, socket.id);
+    console.log(`User ${userId} authenticated with socket ${socket.id}`);
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    // Remove user from connected users
+    for (const [userId, socketId] of connectedUsers.entries()) {
+      if (socketId === socket.id) {
+        connectedUsers.delete(userId);
+        console.log(`User ${userId} disconnected`);
+        break;
+      }
+    }
+  });
+});
+
+// Export io instance to use in routes
+app.set('io', io);
+app.set('connectedUsers', connectedUsers);
+
+// Global rate limiter
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: {
+    message: 'Too many requests from this IP, please try again later',
+    error: 'RATE_LIMIT_EXCEEDED'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false // Disable the `X-RateLimit-*` headers
+});
+
+// Apply global rate limiter to all requests
+app.use(globalLimiter);
 
 // ========== ROUTES ========== //
 
@@ -343,6 +396,7 @@ app.post("/api/auth/login", async (req, res) => {
 // Use routes
 app.use('/api/users', userRoutes);
 app.use('/api/photos', photoRoutes);
+app.use('/api/notifications', notificationsRouter);
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -398,7 +452,7 @@ app.use((err, req, res, next) => {
 
 // Start Server
 connectDB().then(() => {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 Allowed origins: ${allowedOrigins.join(', ')}`);
     console.log(`🔒 Secure cookies: ${process.env.NODE_ENV === 'production'}`);

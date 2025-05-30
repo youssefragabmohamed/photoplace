@@ -8,7 +8,13 @@
     "dev": "nodemon server.js",
     "build": "npm install --omit=dev"
   },
-  "keywords": ["photo", "marketplace", "api", "express", "mongodb"],
+  "keywords": [
+    "photo",
+    "marketplace",
+    "api",
+    "express",
+    "mongodb"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -23,7 +29,8 @@
     "mongoose": "^8.10.1",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
-    "rate-limiter": "^0.2.0"
+    "rate-limiter": "^0.2.0",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

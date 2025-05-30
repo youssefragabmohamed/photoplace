@@ -303,4 +303,65 @@ router.post('/update-pic', authMiddleware, upload.single('profilePic'), async (r
   }
 });
 
+// Search users
+router.get('/search', authMiddleware, async (req, res) => {
+  try {
+    const { query } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1); // Ensure page is at least 1
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 20)); // Limit between 1 and 20
+    const skip = (page - 1) * limit;
+
+    // Validate query length if provided
+    if (query && (query.length < 2 || query.length > 50)) {
+      return res.status(400).json({
+        message: 'Search query must be between 2 and 50 characters'
+      });
+    }
+
+    let searchQuery = {};
+    if (query) {
+      searchQuery = {
+        $or: [
+          { username: { $regex: query, $options: 'i' } },
+          { name: { $regex: query, $options: 'i' } }
+        ]
+      };
+    }
+
+    const [users, total] = await Promise.all([
+      User.find(searchQuery)
+        .select('username name profilePic bio followers following')
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(searchQuery)
+    ]).catch(err => {
+      throw new Error('Database query failed');
+    });
+
+    // Add follower counts and remove sensitive data
+    const sanitizedUsers = users.map(user => ({
+      ...user,
+      followersCount: user.followers?.length || 0,
+      followingCount: user.following?.length || 0,
+      followers: undefined,
+      following: undefined
+    }));
+
+    res.json({
+      users: sanitizedUsers,
+      page,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total,
+      total
+    });
+  } catch (err) {
+    console.error('User search error:', err);
+    res.status(500).json({
+      message: 'Failed to search users',
+      error: err.message
+    });
+  }
+});
+
 module.exports = router;

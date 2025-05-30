@@ -6,6 +6,8 @@ const fs = require('fs');
 const Photo = require('../models/photo');
 const User = require('../models/user');
 const authMiddleware = require('../middleware/auth');
+const Notification = require('../models/notification');
+const rateLimit = require('express-rate-limit');
 
 // File Upload Configuration with better error handling
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -66,6 +68,26 @@ const upload = multer({
     }
   }
 });
+
+// Rate limiting configuration
+const searchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: {
+    message: 'Too many search requests, please try again later',
+    error: 'RATE_LIMIT_EXCEEDED'
+  }
+});
+
+// Cache configuration for frequently searched queries
+const searchCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Sanitize search query
+const sanitizeSearchQuery = (query) => {
+  // Remove any MongoDB operators or special characters
+  return query.replace(/[${}()]/g, '').trim();
+};
 
 // Get all photos
 router.get('/', authMiddleware, async (req, res) => {
@@ -336,7 +358,7 @@ router.get('/saved', authMiddleware, async (req, res) => {
 // Save/unsave photo
 router.post('/save/:photoId', authMiddleware, async (req, res) => {
   try {
-    const photo = await Photo.findById(req.params.photoId);
+    const photo = await Photo.findById(req.params.photoId).populate('userId');
     if (!photo) return res.status(404).json({ message: "Photo not found" });
 
     const user = await User.findById(req.userId);
@@ -354,6 +376,35 @@ router.post('/save/:photoId', authMiddleware, async (req, res) => {
     } else {
       user.savedPhotos.push(photo._id);
       await user.save();
+
+      // Create notification
+      if (photo.userId._id.toString() !== req.userId) {
+        const notification = new Notification({
+          userId: photo.userId._id,
+          type: 'save',
+          fromUser: req.userId,
+          photoId: photo._id,
+          message: `${user.username} saved your photo "${photo.title}"`
+        });
+        await notification.save();
+
+        // Send real-time notification
+        const io = req.app.get('io');
+        const connectedUsers = req.app.get('connectedUsers');
+        const ownerSocketId = connectedUsers.get(photo.userId._id.toString());
+        
+        if (ownerSocketId) {
+          io.to(ownerSocketId).emit('notification', {
+            ...notification.toObject(),
+            fromUser: {
+              _id: user._id,
+              username: user.username,
+              profilePic: user.profilePic
+            }
+          });
+        }
+      }
+
       return res.status(200).json({ 
         message: "Photo saved successfully", 
         isSaved: true 
@@ -362,6 +413,71 @@ router.post('/save/:photoId', authMiddleware, async (req, res) => {
   } catch (err) {
     res.status(500).json({ 
       message: "Failed to save photo", 
+      error: err.message 
+    });
+  }
+});
+
+// Like/unlike photo
+router.post('/like/:photoId', authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.photoId).populate('userId');
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const alreadyLiked = photo.likes.includes(req.userId);
+    
+    if (alreadyLiked) {
+      photo.likes = photo.likes.filter(id => !id.equals(req.userId));
+      await photo.save();
+      return res.status(200).json({ 
+        message: "Photo unliked", 
+        isLiked: false,
+        likes: photo.likes.length
+      });
+    } else {
+      photo.likes.push(req.userId);
+      await photo.save();
+
+      // Create notification
+      if (photo.userId._id.toString() !== req.userId) {
+        const notification = new Notification({
+          userId: photo.userId._id,
+          type: 'like',
+          fromUser: req.userId,
+          photoId: photo._id,
+          message: `${user.username} liked your photo "${photo.title}"`
+        });
+        await notification.save();
+
+        // Send real-time notification
+        const io = req.app.get('io');
+        const connectedUsers = req.app.get('connectedUsers');
+        const ownerSocketId = connectedUsers.get(photo.userId._id.toString());
+        
+        if (ownerSocketId) {
+          io.to(ownerSocketId).emit('notification', {
+            ...notification.toObject(),
+            fromUser: {
+              _id: user._id,
+              username: user.username,
+              profilePic: user.profilePic
+            }
+          });
+        }
+      }
+
+      return res.status(200).json({ 
+        message: "Photo liked", 
+        isLiked: true,
+        likes: photo.likes.length
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to like photo", 
       error: err.message 
     });
   }
@@ -413,6 +529,121 @@ router.get('/:photoId', authMiddleware, async (req, res) => {
     res.status(500).json({
       message: "Failed to fetch photo",
       error: err.message
+    });
+  }
+});
+
+// Search photos with rate limiting and caching
+router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
+  try {
+    const { query, location, sortBy = 'recent' } = req.query;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 12));
+    const skip = (page - 1) * limit;
+
+    // Validate query length if provided
+    if (query && (query.length < 2 || query.length > 50)) {
+      return res.status(400).json({
+        message: 'Search query must be between 2 and 50 characters'
+      });
+    }
+
+    // Validate location
+    const validLocations = ['all', 'digital', 'nature', 'urban', 'studio'];
+    if (location && !validLocations.includes(location)) {
+      return res.status(400).json({
+        message: 'Invalid location filter'
+      });
+    }
+
+    // Validate sort option
+    const validSortOptions = ['recent', 'likes', 'oldest'];
+    if (!validSortOptions.includes(sortBy)) {
+      return res.status(400).json({
+        message: 'Invalid sort option'
+      });
+    }
+
+    // Generate cache key
+    const cacheKey = JSON.stringify({
+      query: query || '',
+      location: location || 'all',
+      sortBy,
+      page,
+      limit
+    });
+
+    // Check cache
+    const cachedResult = searchCache.get(cacheKey);
+    if (cachedResult) {
+      return res.status(200).json(cachedResult);
+    }
+
+    // Build search query
+    let searchQuery = {};
+    
+    if (query) {
+      const sanitizedQuery = sanitizeSearchQuery(query);
+      searchQuery.$or = [
+        { title: { $regex: sanitizedQuery, $options: 'i' } },
+        { description: { $regex: sanitizedQuery, $options: 'i' } }
+      ];
+    }
+
+    if (location && location !== 'all') {
+      searchQuery.location = location;
+    }
+
+    // Build sort options
+    let sortOptions = {};
+    switch (sortBy) {
+      case 'likes':
+        sortOptions = { 'likes.length': -1, createdAt: -1 };
+        break;
+      case 'oldest':
+        sortOptions = { createdAt: 1 };
+        break;
+      default:
+        sortOptions = { createdAt: -1 };
+    }
+
+    try {
+      const [photos, total] = await Promise.all([
+        Photo.find(searchQuery)
+          .populate('userId', 'username profilePic')
+          .sort(sortOptions)
+          .skip(skip)
+          .limit(limit)
+          .lean()
+          .maxTimeMS(5000), // Set maximum execution time
+        Photo.countDocuments(searchQuery)
+      ]);
+
+      const result = {
+        photos,
+        page,
+        totalPages: Math.ceil(total / limit),
+        hasMore: page * limit < total,
+        total,
+        query: query || '',
+        location: location || 'all',
+        sortBy
+      };
+
+      // Cache the result
+      searchCache.set(cacheKey, result);
+      setTimeout(() => searchCache.delete(cacheKey), CACHE_TTL);
+
+      res.status(200).json(result);
+    } catch (dbError) {
+      console.error('Database query error:', dbError);
+      throw new Error('Failed to search photos');
+    }
+  } catch (err) {
+    console.error("Search error:", err);
+    res.status(500).json({
+      message: err.message || "Failed to search photos",
+      error: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   }
 });
