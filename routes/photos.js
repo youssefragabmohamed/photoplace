@@ -8,6 +8,7 @@ const User = require('../models/user');
 const authMiddleware = require('../middleware/auth');
 const Notification = require('../models/notification');
 const rateLimit = require('express-rate-limit');
+const elasticsearchService = require('../services/elasticsearchService');
 
 // File Upload Configuration with better error handling
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -138,7 +139,7 @@ router.get('/', authMiddleware, async (req, res) => {
 // Upload photo with enhanced error handling
 router.post('/upload', authMiddleware, (req, res, next) => {
   console.log('Starting upload process...');
-  upload.single('photo')(req, res, (err) => {
+  upload.single('photo')(req, res, async (err) => {
     if (err) {
       console.error('Multer error:', err);
       return res.status(400).json({
@@ -207,6 +208,9 @@ router.post('/upload', authMiddleware, (req, res, next) => {
 
     const savedPhoto = await photo.save();
     console.log('Photo saved to database:', savedPhoto._id);
+
+    // Index the photo in Elasticsearch
+    await elasticsearchService.indexPhoto(savedPhoto);
 
     // Populate user data more carefully
     const populatedPhoto = await Photo.findById(savedPhoto._id)
@@ -514,6 +518,9 @@ router.delete('/:photoId', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Photo not found or unauthorized" });
     }
 
+    // Remove from Elasticsearch
+    await elasticsearchService.deletePhoto(photo._id);
+
     try {
       const filename = photo.url.split('/').pop();
       const filePath = path.join(uploadsDir, filename);
@@ -552,74 +559,39 @@ router.get('/:photoId', authMiddleware, async (req, res) => {
   }
 });
 
-// Search photos with rate limiting and caching
+// Search photos with Elasticsearch
 router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
   try {
     console.log('Search request:', req.query);
     const { query, location = 'all', sortBy = 'recent' } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 12));
-    const skip = (page - 1) * limit;
 
-    // Build search query
-    let searchQuery = {};
-    
-    if (query && query.trim()) {
-      searchQuery.$or = [
-        { title: { $regex: query, $options: 'i' } },
-        { description: { $regex: query, $options: 'i' } }
-      ];
-    }
-
-    if (location && location !== 'all') {
-      searchQuery.location = location;
-    }
-
-    // Add sorting
-    let sortOptions = {};
-    switch (sortBy) {
-      case 'recent':
-        sortOptions = { createdAt: -1 };
-        break;
-      case 'oldest':
-        sortOptions = { createdAt: 1 };
-        break;
-      case 'title':
-        sortOptions = { title: 1 };
-        break;
-      default:
-        sortOptions = { createdAt: -1 };
-    }
-
-    console.log('MongoDB query:', {
-      query: searchQuery,
-      sort: sortOptions,
-      skip,
+    const searchResults = await elasticsearchService.searchPhotos({
+      query,
+      location,
+      sortBy,
+      page,
       limit
     });
 
-    const [photos, total] = await Promise.all([
-      Photo.find(searchQuery)
-        .populate('userId', 'username profilePic')
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Photo.countDocuments(searchQuery)
-    ]);
-
-    console.log('Search results:', {
-      count: photos.length,
-      total,
-      hasMore: skip + photos.length < total
-    });
+    // Populate user data for each photo
+    const photosWithUsers = await Promise.all(
+      searchResults.photos.map(async (photo) => {
+        const user = await User.findById(photo.userId).select('username profilePic');
+        return {
+          ...photo,
+          userId: user
+        };
+      })
+    );
 
     res.status(200).json({
-      photos: photos || [],
-      page,
-      totalPages: Math.ceil(total / limit),
-      hasMore: skip + photos.length < total,
-      total
+      photos: photosWithUsers,
+      page: searchResults.page,
+      totalPages: searchResults.totalPages,
+      hasMore: searchResults.hasMore,
+      total: searchResults.total
     });
   } catch (err) {
     console.error('Search error:', err);

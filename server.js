@@ -14,6 +14,7 @@ const cookieParser = require("cookie-parser");
 const connectDB = require("./db");
 const Photo = require("./models/photo.js");
 const User = require("./models/user.js");
+const { initializeIndex, testConnection } = require('./services/elasticsearchService');
 
 // Import user routes
 const userRoutes = require('./routes/users');
@@ -56,7 +57,22 @@ requiredEnvVars.forEach(varName => {
 });
 
 // Database Connection
-mongoose.connection.on('connected', () => console.log('✅ MongoDB Connected'));
+mongoose.connection.on('connected', async () => {
+  console.log('✅ MongoDB Connected');
+  
+  // Initialize Elasticsearch
+  try {
+    const esConnected = await testConnection();
+    if (esConnected) {
+      await initializeIndex();
+      console.log('✅ Elasticsearch index initialized');
+    } else {
+      console.error('❌ Failed to initialize Elasticsearch');
+    }
+  } catch (error) {
+    console.error('❌ Error initializing Elasticsearch:', error);
+  }
+});
 mongoose.connection.on('error', (err) => console.error('❌ MongoDB Error:', err));
 process.on('SIGINT', async () => {
   await mongoose.connection.close();

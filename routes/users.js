@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const elasticsearchService = require('../services/elasticsearchService');
 
 // Configure multer for profile picture uploads
 const storage = multer.diskStorage({
@@ -118,6 +119,9 @@ router.patch('/:userId', authMiddleware, async (req, res) => {
       { new: true, runValidators: true }
     ).select('-password');
 
+    // Update user in Elasticsearch
+    await elasticsearchService.indexUser(user);
+
     res.status(200).json({ user });
   } catch (err) {
     res.status(500).json({ 
@@ -138,6 +142,9 @@ router.delete('/:userId', authMiddleware, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
+
+    // Delete user from Elasticsearch
+    await elasticsearchService.deleteUser(req.params.userId);
 
     // Delete all user's photos
     await Photo.deleteMany({ userId: req.params.userId });
@@ -171,6 +178,9 @@ router.post('/signup', async (req, res) => {
 
         // Save user to database
         await user.save();
+
+        // Index user in Elasticsearch
+        await elasticsearchService.indexUser(user);
 
         // Create JWT token
         const token = jwt.sign(
@@ -303,13 +313,12 @@ router.post('/update-pic', authMiddleware, upload.single('profilePic'), async (r
   }
 });
 
-// Search users
+// Search users with Elasticsearch
 router.get('/search', authMiddleware, async (req, res) => {
   try {
     const { query } = req.query;
-    const page = Math.max(1, parseInt(req.query.page) || 1); // Ensure page is at least 1
-    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 20)); // Limit between 1 and 20
-    const skip = (page - 1) * limit;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 20));
 
     // Validate query length if provided
     if (query && (query.length < 2 || query.length > 50)) {
@@ -318,42 +327,33 @@ router.get('/search', authMiddleware, async (req, res) => {
       });
     }
 
-    let searchQuery = {};
-    if (query) {
-      searchQuery = {
-        $or: [
-          { username: { $regex: query, $options: 'i' } },
-          { name: { $regex: query, $options: 'i' } }
-        ]
-      };
-    }
-
-    const [users, total] = await Promise.all([
-      User.find(searchQuery)
-        .select('username name profilePic bio followers following')
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      User.countDocuments(searchQuery)
-    ]).catch(err => {
-      throw new Error('Database query failed');
+    const searchResults = await elasticsearchService.searchUsers({
+      query: query || '',
+      page,
+      limit
     });
 
-    // Add follower counts and remove sensitive data
-    const sanitizedUsers = users.map(user => ({
-      ...user,
-      followersCount: user.followers?.length || 0,
-      followingCount: user.following?.length || 0,
-      followers: undefined,
-      following: undefined
-    }));
+    // Add follower and following counts from MongoDB
+    const usersWithCounts = await Promise.all(
+      searchResults.users.map(async (user) => {
+        const dbUser = await User.findById(user._id)
+          .select('followers following')
+          .lean();
+        
+        return {
+          ...user,
+          followersCount: dbUser?.followers?.length || 0,
+          followingCount: dbUser?.following?.length || 0
+        };
+      })
+    );
 
     res.json({
-      users: sanitizedUsers,
-      page,
-      totalPages: Math.ceil(total / limit),
-      hasMore: page * limit < total,
-      total
+      users: usersWithCounts,
+      page: searchResults.page,
+      totalPages: searchResults.totalPages,
+      hasMore: searchResults.hasMore,
+      total: searchResults.total
     });
   } catch (err) {
     console.error('User search error:', err);
