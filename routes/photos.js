@@ -358,17 +358,34 @@ router.get('/saved', authMiddleware, async (req, res) => {
 // Save/unsave photo
 router.post('/save/:photoId', authMiddleware, async (req, res) => {
   try {
-    const photo = await Photo.findById(req.params.photoId).populate('userId');
-    if (!photo) return res.status(404).json({ message: "Photo not found" });
+    console.log('Save photo request:', {
+      photoId: req.params.photoId,
+      userId: req.userId
+    });
+
+    const photo = await Photo.findById(req.params.photoId);
+    if (!photo) {
+      console.error('Photo not found:', req.params.photoId);
+      return res.status(404).json({ message: "Photo not found" });
+    }
 
     const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.error('User not found:', req.userId);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     const alreadySaved = user.savedPhotos.includes(photo._id);
+    console.log('Save photo status:', {
+      photoId: photo._id,
+      userId: user._id,
+      alreadySaved
+    });
     
     if (alreadySaved) {
       user.savedPhotos = user.savedPhotos.filter(id => !id.equals(photo._id));
       await user.save();
+      console.log('Photo removed from saved');
       return res.status(200).json({ 
         message: "Photo removed from saved", 
         isSaved: false 
@@ -376,11 +393,12 @@ router.post('/save/:photoId', authMiddleware, async (req, res) => {
     } else {
       user.savedPhotos.push(photo._id);
       await user.save();
+      console.log('Photo saved successfully');
 
       // Create notification
-      if (photo.userId._id.toString() !== req.userId) {
+      if (photo.userId.toString() !== req.userId) {
         const notification = new Notification({
-          userId: photo.userId._id,
+          userId: photo.userId,
           type: 'save',
           fromUser: req.userId,
           photoId: photo._id,
@@ -391,7 +409,7 @@ router.post('/save/:photoId', authMiddleware, async (req, res) => {
         // Send real-time notification
         const io = req.app.get('io');
         const connectedUsers = req.app.get('connectedUsers');
-        const ownerSocketId = connectedUsers.get(photo.userId._id.toString());
+        const ownerSocketId = connectedUsers.get(photo.userId.toString());
         
         if (ownerSocketId) {
           io.to(ownerSocketId).emit('notification', {
@@ -411,6 +429,7 @@ router.post('/save/:photoId', authMiddleware, async (req, res) => {
       });
     }
   } catch (err) {
+    console.error('Save photo error:', err);
     res.status(500).json({ 
       message: "Failed to save photo", 
       error: err.message 
@@ -536,64 +555,19 @@ router.get('/:photoId', authMiddleware, async (req, res) => {
 // Search photos with rate limiting and caching
 router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
   try {
-    const { query, location, sortBy = 'recent' } = req.query;
+    console.log('Search request:', req.query);
+    const { query, location = 'all', sortBy = 'recent' } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 12));
     const skip = (page - 1) * limit;
 
-    // Input validation
-    if (query && (query.length < 2 || query.length > 50)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Search query must be between 2 and 50 characters'
-      });
-    }
-
-    // Validate location
-    const validLocations = ['all', 'digital', 'nature', 'urban', 'studio'];
-    if (location && !validLocations.includes(location)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid location filter'
-      });
-    }
-
-    // Validate sort option
-    const validSortOptions = ['recent', 'likes', 'oldest'];
-    if (!validSortOptions.includes(sortBy)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid sort option'
-      });
-    }
-
-    // Generate cache key
-    const cacheKey = JSON.stringify({
-      query: query || '',
-      location: location || 'all',
-      sortBy,
-      page,
-      limit
-    });
-
-    // Check cache
-    const cachedResult = searchCache.get(cacheKey);
-    if (cachedResult) {
-      return res.status(200).json({
-        success: true,
-        ...cachedResult
-      });
-    }
-
     // Build search query
     let searchQuery = {};
     
-    if (query) {
-      const sanitizedQuery = sanitizeSearchQuery(query);
+    if (query && query.trim()) {
       searchQuery.$or = [
-        { title: { $regex: sanitizedQuery, $options: 'i' } },
-        { description: { $regex: sanitizedQuery, $options: 'i' } },
-        { tags: { $regex: sanitizedQuery, $options: 'i' } }
+        { title: { $regex: query, $options: 'i' } },
+        { description: { $regex: query, $options: 'i' } }
       ];
     }
 
@@ -601,18 +575,28 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
       searchQuery.location = location;
     }
 
-    // Build sort options
+    // Add sorting
     let sortOptions = {};
     switch (sortBy) {
-      case 'likes':
-        sortOptions = { 'likes.length': -1, createdAt: -1 };
+      case 'recent':
+        sortOptions = { createdAt: -1 };
         break;
       case 'oldest':
         sortOptions = { createdAt: 1 };
         break;
+      case 'title':
+        sortOptions = { title: 1 };
+        break;
       default:
         sortOptions = { createdAt: -1 };
     }
+
+    console.log('MongoDB query:', {
+      query: searchQuery,
+      sort: sortOptions,
+      skip,
+      limit
+    });
 
     const [photos, total] = await Promise.all([
       Photo.find(searchQuery)
@@ -620,41 +604,28 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
         .sort(sortOptions)
         .skip(skip)
         .limit(limit)
-        .lean()
-        .maxTimeMS(5000), // Set maximum execution time
+        .lean(),
       Photo.countDocuments(searchQuery)
-    ]).catch(err => {
-      console.error('Database query error:', err);
-      throw new Error('Failed to search photos');
+    ]);
+
+    console.log('Search results:', {
+      count: photos.length,
+      total,
+      hasMore: skip + photos.length < total
     });
 
-    const result = {
-      success: true,
-      photos: photos.map(photo => ({
-        ...photo,
-        likesCount: photo.likes?.length || 0,
-        commentsCount: photo.comments?.length || 0
-      })),
+    res.status(200).json({
+      photos: photos || [],
       page,
       totalPages: Math.ceil(total / limit),
-      hasMore: page * limit < total,
-      total,
-      query: query || '',
-      location: location || 'all',
-      sortBy
-    };
-
-    // Cache the result
-    searchCache.set(cacheKey, result);
-    setTimeout(() => searchCache.delete(cacheKey), CACHE_TTL);
-
-    res.status(200).json(result);
+      hasMore: skip + photos.length < total,
+      total
+    });
   } catch (err) {
-    console.error("Search error:", err);
+    console.error('Search error:', err);
     res.status(500).json({
-      success: false,
-      message: err.message || "Failed to search photos",
-      error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      message: "Failed to search photos",
+      error: err.message
     });
   }
 });
