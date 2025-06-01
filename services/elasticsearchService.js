@@ -8,7 +8,15 @@ const client = new Client({
   ssl: {
     rejectUnauthorized: false
   },
-  retryOnConflict: 3
+  retryOnConflict: 3,
+  // Add additional settings for Bonsai
+  auth: {
+    username: process.env.ELASTICSEARCH_USERNAME,
+    password: process.env.ELASTICSEARCH_PASSWORD
+  },
+  headers: {
+    'Content-Type': 'application/json'
+  }
 });
 
 // Test connection on startup with retry logic
