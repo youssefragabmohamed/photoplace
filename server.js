@@ -24,6 +24,9 @@ const notificationsRouter = require('./routes/notifications');
 const app = express();
 const server = require('http').createServer(app);
 
+// Trust proxy - required for rate limiting behind reverse proxies
+app.set('trust proxy', 1);
+
 // Enhanced CORS Configuration
 const allowedOrigins = [
   "https://frontend-photoplace.vercel.app",

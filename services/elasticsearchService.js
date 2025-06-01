@@ -3,21 +3,30 @@ const { Client } = require('@elastic/elasticsearch');
 // Configure Elasticsearch client for Bonsai
 const client = new Client({
   node: process.env.ELASTICSEARCH_URL || 'http://localhost:9200',
+  maxRetries: 3,
+  requestTimeout: 30000,
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+  retryOnConflict: 3
 });
 
-// Test connection on startup
-async function testConnection() {
-  try {
-    const health = await client.cluster.health();
-    console.log('✅ Elasticsearch connection successful:', health.status);
-    return true;
-  } catch (error) {
-    console.error('❌ Elasticsearch connection failed:', error.message);
-    return false;
+// Test connection on startup with retry logic
+async function testConnection(retries = 3, delay = 5000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const health = await client.cluster.health();
+      console.log('✅ Elasticsearch connection successful:', health.status);
+      return true;
+    } catch (error) {
+      console.error(`❌ Elasticsearch connection attempt ${i + 1}/${retries} failed:`, error.message);
+      if (i < retries - 1) {
+        console.log(`Retrying in ${delay/1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
+  return false;
 }
 
 const PHOTO_INDEX = 'photos';
