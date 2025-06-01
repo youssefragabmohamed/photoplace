@@ -541,9 +541,10 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
     const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 12));
     const skip = (page - 1) * limit;
 
-    // Validate query length if provided
+    // Input validation
     if (query && (query.length < 2 || query.length > 50)) {
       return res.status(400).json({
+        success: false,
         message: 'Search query must be between 2 and 50 characters'
       });
     }
@@ -552,6 +553,7 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
     const validLocations = ['all', 'digital', 'nature', 'urban', 'studio'];
     if (location && !validLocations.includes(location)) {
       return res.status(400).json({
+        success: false,
         message: 'Invalid location filter'
       });
     }
@@ -560,6 +562,7 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
     const validSortOptions = ['recent', 'likes', 'oldest'];
     if (!validSortOptions.includes(sortBy)) {
       return res.status(400).json({
+        success: false,
         message: 'Invalid sort option'
       });
     }
@@ -576,7 +579,10 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
     // Check cache
     const cachedResult = searchCache.get(cacheKey);
     if (cachedResult) {
-      return res.status(200).json(cachedResult);
+      return res.status(200).json({
+        success: true,
+        ...cachedResult
+      });
     }
 
     // Build search query
@@ -586,7 +592,8 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
       const sanitizedQuery = sanitizeSearchQuery(query);
       searchQuery.$or = [
         { title: { $regex: sanitizedQuery, $options: 'i' } },
-        { description: { $regex: sanitizedQuery, $options: 'i' } }
+        { description: { $regex: sanitizedQuery, $options: 'i' } },
+        { tags: { $regex: sanitizedQuery, $options: 'i' } }
       ];
     }
 
@@ -607,41 +614,45 @@ router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
         sortOptions = { createdAt: -1 };
     }
 
-    try {
-      const [photos, total] = await Promise.all([
-        Photo.find(searchQuery)
-          .populate('userId', 'username profilePic')
-          .sort(sortOptions)
-          .skip(skip)
-          .limit(limit)
-          .lean()
-          .maxTimeMS(5000), // Set maximum execution time
-        Photo.countDocuments(searchQuery)
-      ]);
-
-      const result = {
-        photos,
-        page,
-        totalPages: Math.ceil(total / limit),
-        hasMore: page * limit < total,
-        total,
-        query: query || '',
-        location: location || 'all',
-        sortBy
-      };
-
-      // Cache the result
-      searchCache.set(cacheKey, result);
-      setTimeout(() => searchCache.delete(cacheKey), CACHE_TTL);
-
-      res.status(200).json(result);
-    } catch (dbError) {
-      console.error('Database query error:', dbError);
+    const [photos, total] = await Promise.all([
+      Photo.find(searchQuery)
+        .populate('userId', 'username profilePic')
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .maxTimeMS(5000), // Set maximum execution time
+      Photo.countDocuments(searchQuery)
+    ]).catch(err => {
+      console.error('Database query error:', err);
       throw new Error('Failed to search photos');
-    }
+    });
+
+    const result = {
+      success: true,
+      photos: photos.map(photo => ({
+        ...photo,
+        likesCount: photo.likes?.length || 0,
+        commentsCount: photo.comments?.length || 0
+      })),
+      page,
+      totalPages: Math.ceil(total / limit),
+      hasMore: page * limit < total,
+      total,
+      query: query || '',
+      location: location || 'all',
+      sortBy
+    };
+
+    // Cache the result
+    searchCache.set(cacheKey, result);
+    setTimeout(() => searchCache.delete(cacheKey), CACHE_TTL);
+
+    res.status(200).json(result);
   } catch (err) {
     console.error("Search error:", err);
     res.status(500).json({
+      success: false,
       message: err.message || "Failed to search photos",
       error: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });

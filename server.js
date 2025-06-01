@@ -22,10 +22,22 @@ const notificationsRouter = require('./routes/notifications');
 
 const app = express();
 const server = require('http').createServer(app);
+
+// Enhanced CORS Configuration
+const allowedOrigins = [
+  "https://frontend-photoplace.vercel.app",
+  "http://localhost:3000"
+];
+
+console.log("Allowed Origins:", allowedOrigins);
+
+// Socket.IO setup with CORS
 const io = require('socket.io')(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"]
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"]
   }
 });
 
@@ -52,18 +64,13 @@ process.on('SIGINT', async () => {
 });
 
 // Enhanced CORS Configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) 
-  : [
-      "https://frontend-photoplace.vercel.app", // Corrected URL with hyphen
-      "http://localhost:3000" // Local development
-    ];
-
-console.log("Allowed Origins:", allowedOrigins);
-
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.error('CORS Error: Origin not allowed -', origin);
@@ -71,15 +78,15 @@ const corsOptions = {
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // Include OPTIONS
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'], // Allowed headers
-  optionsSuccessStatus: 200 // For legacy browsers
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 };
 
-// Apply CORS middleware to all routes
+// Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Explicit preflight handling
+// Handle preflight requests
 app.options('*', cors(corsOptions));
 
 // Enhanced Security Middleware
