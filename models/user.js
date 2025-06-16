@@ -134,6 +134,26 @@ userSchema.pre('save', function(next) {
   next();
 });
 
+// Add text index for search
+userSchema.index({ 
+  username: 'text',
+  fullName: 'text',
+  bio: 'text',
+  location: 'text',
+  portfolioTitle: 'text',
+  portfolioDescription: 'text'
+}, {
+  weights: {
+    username: 10,
+    fullName: 8,
+    bio: 5,
+    location: 3,
+    portfolioTitle: 4,
+    portfolioDescription: 2
+  },
+  name: 'user_text_search'
+});
+
 // Virtuals
 userSchema.virtual('photos', {
   ref: 'Photo',

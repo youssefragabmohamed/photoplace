@@ -14,7 +14,6 @@ const cookieParser = require("cookie-parser");
 const connectDB = require("./db");
 const Photo = require("./models/photo.js");
 const User = require("./models/user.js");
-const { initializeIndex, testConnection } = require('./services/elasticsearchService');
 
 // Import user routes
 const userRoutes = require('./routes/users');
@@ -62,20 +61,8 @@ requiredEnvVars.forEach(varName => {
 // Database Connection
 mongoose.connection.on('connected', async () => {
   console.log('✅ MongoDB Connected');
-  
-  // Initialize Elasticsearch
-  try {
-    const esConnected = await testConnection();
-    if (esConnected) {
-      await initializeIndex();
-      console.log('✅ Elasticsearch index initialized');
-    } else {
-      console.error('❌ Failed to initialize Elasticsearch');
-    }
-  } catch (error) {
-    console.error('❌ Error initializing Elasticsearch:', error);
-  }
 });
+
 mongoose.connection.on('error', (err) => console.error('❌ MongoDB Error:', err));
 process.on('SIGINT', async () => {
   await mongoose.connection.close();
@@ -116,10 +103,27 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https://*.onrender.com"],
-      connectSrc: ["'self'", ...allowedOrigins],
+      connectSrc: [
+        "'self'",
+        ...allowedOrigins,
+        "https://*.bonsaisearch.net",
+        "https://*.bonsai.io"
+      ],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"]
     }
   },
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: true,
+  crossOriginOpenerPolicy: true,
+  dnsPrefetchControl: true,
+  frameguard: { action: 'deny' },
+  hidePoweredBy: true,
+  hsts: true,
+  ieNoOpen: true,
+  noSniff: true,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  xssFilter: true
 }));
 
 app.use(cookieParser());
@@ -156,25 +160,69 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
   }
 });
+
+// File filter function
+const fileFilter = (req, file, cb) => {
+  // Check file type
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+  if (!allowedTypes.includes(file.mimetype)) {
+    return cb(new Error('Invalid file type. Only JPEG, PNG and GIF are allowed.'), false);
+  }
+
+  // Check file size (2MB limit)
+  const maxSize = 2 * 1024 * 1024; // 2MB
+  if (file.size > maxSize) {
+    return cb(new Error('File too large. Maximum size is 2MB.'), false);
+  }
+
+  // Check file extension
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = ['.jpg', '.jpeg', '.png', '.gif'];
+  if (!allowedExts.includes(ext)) {
+    return cb(new Error('Invalid file extension. Only .jpg, .jpeg, .png and .gif are allowed.'), false);
+  }
+
+  cb(null, true);
+};
 
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: 2 * 1024 * 1024, // 2MB limit
+    files: 1 // Only allow one file per request
   },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
-    if (!allowedTypes.includes(file.mimetype)) {
-      const error = new Error('Invalid file type. Only JPEG, PNG and GIF are allowed.');
-      error.code = 'INVALID_FILE_TYPE';
-      return cb(error, false);
-    }
-    cb(null, true);
-  }
+  fileFilter: fileFilter
 });
+
+// Error handling for multer
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: 'File too large',
+        details: 'Maximum file size is 2MB'
+      });
+    }
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return res.status(413).json({
+        error: 'Too many files',
+        details: 'Only one file can be uploaded at a time'
+      });
+    }
+    return res.status(400).json({
+      error: 'File upload error',
+      details: err.message
+    });
+  }
+  next(err);
+};
+
+// Apply multer error handling
+app.use(handleMulterError);
 
 // Health check endpoint
 app.get('/healthcheck', (req, res) => {
@@ -245,6 +293,28 @@ const globalLimiter = rateLimit({
 
 // Apply global rate limiter to all requests
 app.use(globalLimiter);
+
+// Enhanced rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: "Too many requests from this IP, please try again later",
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Apply rate limiting to all routes
+app.use(limiter);
+
+// Specific rate limit for file uploads
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Limit each IP to 10 uploads per hour
+  message: "Too many uploads from this IP, please try again later"
+});
+
+// Apply upload rate limiting to upload routes
+app.use('/api/photos/upload', uploadLimiter);
 
 // ========== ROUTES ========== //
 
@@ -427,52 +497,29 @@ app.use('/api/notifications', notificationsRouter);
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Enhanced Error Handling
-app.use((req, res) => res.status(404).json({ 
-  message: "Endpoint not found",
-  availableEndpoints: [
-    '/api/users/me',
-    '/api/users/signup',
-    '/api/users/login',
-    '/api/photos',
-    '/api/users/profile/:userId'
-  ]
-}));
-
+// Global error handling middleware
 app.use((err, req, res, next) => {
-  console.error("Server Error:", err.stack);
+  console.error('❌ Error:', err);
   
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ 
-        message: "File too large",
-        details: "Maximum file size is 10MB"
-      });
-    }
-    return res.status(400).json({ 
-      message: "File upload error",
-      error: err.message 
+  // Handle specific error types
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      error: 'Validation Error',
+      details: Object.values(err.errors).map(e => e.message)
     });
   }
   
-  if (err.message.includes('Invalid file type')) {
-    return res.status(415).json({ 
-      message: "Invalid file type",
-      allowedTypes: ['image/jpeg', 'image/png', 'image/gif']
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({
+      error: 'Invalid token'
     });
   }
-
-  if (err.message.includes('CORS')) {
-    return res.status(403).json({ 
-      message: "CORS error",
-      allowedOrigins,
-      yourOrigin: req.headers.origin
-    });
-  }
-
-  res.status(500).json({ 
-    message: "Internal server error",
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+  
+  // Default error response
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message
   });
 });
 

@@ -9,6 +9,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const elasticsearchService = require('../services/elasticsearchService');
+const Follow = require('../models/follow');
 
 // Configure multer for profile picture uploads
 const storage = multer.diskStorage({
@@ -313,54 +314,61 @@ router.post('/update-pic', authMiddleware, upload.single('profilePic'), async (r
   }
 });
 
-// Search users with Elasticsearch
+// Search users
 router.get('/search', authMiddleware, async (req, res) => {
   try {
-    const { query } = req.query;
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 20));
-
-    // Validate query length if provided
-    if (query && (query.length < 2 || query.length > 50)) {
-      return res.status(400).json({
-        message: 'Search query must be between 2 and 50 characters'
-      });
+    const { q, page = 1, limit = 12 } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({ message: 'Search query is required' });
     }
 
-    const searchResults = await elasticsearchService.searchUsers({
-      query: query || '',
-      page,
-      limit
-    });
+    const sanitizedQuery = q.trim();
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Add follower and following counts from MongoDB
-    const usersWithCounts = await Promise.all(
-      searchResults.users.map(async (user) => {
-        const dbUser = await User.findById(user._id)
-          .select('followers following')
-          .lean();
-        
-        return {
-          ...user,
-          followersCount: dbUser?.followers?.length || 0,
-          followingCount: dbUser?.following?.length || 0
-        };
-      })
-    );
+    // Create text search query
+    const searchQuery = {
+      $text: { $search: sanitizedQuery }
+    };
+
+    // Execute search with pagination
+    const users = await User.find(searchQuery)
+      .select('-password')
+      .sort({ score: { $meta: "textScore" } })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
+    // Get total count for pagination
+    const total = await User.countDocuments(searchQuery);
+
+    // Get additional data for each user
+    const usersWithData = await Promise.all(users.map(async (user) => {
+      const photoCount = await Photo.countDocuments({ userId: user._id });
+      const followerCount = await Follow.countDocuments({ followingId: user._id });
+      const followingCount = await Follow.countDocuments({ followerId: user._id });
+      const isFollowing = await Follow.exists({ followerId: req.user._id, followingId: user._id });
+
+      return {
+        ...user,
+        photoCount,
+        followerCount,
+        followingCount,
+        isFollowing: !!isFollowing
+      };
+    }));
 
     res.json({
-      users: usersWithCounts,
-      page: searchResults.page,
-      totalPages: searchResults.totalPages,
-      hasMore: searchResults.hasMore,
-      total: searchResults.total
+      users: usersWithData,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
     });
-  } catch (err) {
-    console.error('User search error:', err);
-    res.status(500).json({
-      message: 'Failed to search users',
-      error: err.message
-    });
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ message: 'Error searching users' });
   }
 });
 

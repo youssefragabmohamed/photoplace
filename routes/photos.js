@@ -9,6 +9,9 @@ const authMiddleware = require('../middleware/auth');
 const Notification = require('../models/notification');
 const rateLimit = require('express-rate-limit');
 const elasticsearchService = require('../services/elasticsearchService');
+const Like = require('../models/like');
+const Comment = require('../models/comment');
+const Save = require('../models/save');
 
 // File Upload Configuration with better error handling
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -559,46 +562,61 @@ router.get('/:photoId', authMiddleware, async (req, res) => {
   }
 });
 
-// Search photos with Elasticsearch
-router.get('/search', authMiddleware, searchLimiter, async (req, res) => {
+// Search photos
+router.get('/search', authMiddleware, async (req, res) => {
   try {
-    console.log('Search request:', req.query);
-    const { query, location = 'all', sortBy = 'recent' } = req.query;
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(20, Math.max(1, parseInt(req.query.limit) || 12));
+    const { q, page = 1, limit = 12 } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({ message: 'Search query is required' });
+    }
 
-    const searchResults = await elasticsearchService.searchPhotos({
-      query,
-      location,
-      sortBy,
-      page,
-      limit
-    });
+    const sanitizedQuery = q.trim();
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Populate user data for each photo
-    const photosWithUsers = await Promise.all(
-      searchResults.photos.map(async (photo) => {
-        const user = await User.findById(photo.userId).select('username profilePic');
-        return {
-          ...photo,
-          userId: user
-        };
-      })
-    );
+    // Create text search query
+    const searchQuery = {
+      $text: { $search: sanitizedQuery }
+    };
 
-    res.status(200).json({
-      photos: photosWithUsers,
-      page: searchResults.page,
-      totalPages: searchResults.totalPages,
-      hasMore: searchResults.hasMore,
-      total: searchResults.total
+    // Execute search with pagination
+    const photos = await Photo.find(searchQuery)
+      .sort({ score: { $meta: "textScore" } })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .populate('userId', 'username fullName profilePicture')
+      .lean();
+
+    // Get total count for pagination
+    const total = await Photo.countDocuments(searchQuery);
+
+    // Get additional data for each photo
+    const photosWithData = await Promise.all(photos.map(async (photo) => {
+      const likes = await Like.countDocuments({ photoId: photo._id });
+      const comments = await Comment.countDocuments({ photoId: photo._id });
+      const isLiked = await Like.exists({ photoId: photo._id, userId: req.user._id });
+      const isSaved = await Save.exists({ photoId: photo._id, userId: req.user._id });
+
+      return {
+        ...photo,
+        likes,
+        comments,
+        isLiked: !!isLiked,
+        isSaved: !!isSaved
+      };
+    }));
+
+    res.json({
+      photos: photosWithData,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
     });
-  } catch (err) {
-    console.error('Search error:', err);
-    res.status(500).json({
-      message: "Failed to search photos",
-      error: err.message
-    });
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ message: 'Error searching photos' });
   }
 });
 

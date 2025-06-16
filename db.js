@@ -3,7 +3,11 @@ require('dotenv').config();
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI, {
+    const uri = process.env.MONGODB_URI;
+    // Ensure we're using the photoplace database
+    const dbUri = uri.includes('/photoplace?') ? uri : uri.replace('?', '/photoplace?');
+    
+    await mongoose.connect(dbUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 5000,
@@ -11,10 +15,10 @@ const connectDB = async () => {
       maxPoolSize: 10
     });
     
-    console.log('✅ MongoDB Atlas Connected');
+    console.log('✅ MongoDB Atlas Connected to photoplace database');
     
     mongoose.connection.on('connected', () => {
-      console.log('Mongoose connected to DB');
+      console.log('Mongoose connected to photoplace database');
     });
     
     mongoose.connection.on('error', (err) => {

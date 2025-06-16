@@ -55,4 +55,16 @@ photoSchema.pre('save', function(next) {
   next();
 });
 
+// Add text index for search
+photoSchema.index({ 
+  title: 'text', 
+  description: 'text' 
+}, {
+  weights: {
+    title: 10,
+    description: 5
+  },
+  name: 'photo_text_search'
+});
+
 module.exports = mongoose.model("Photo", photoSchema);
