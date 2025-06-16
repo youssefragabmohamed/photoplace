@@ -8,8 +8,8 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const elasticsearchService = require('../services/elasticsearchService');
 const Follow = require('../models/follow');
+const rateLimit = require('express-rate-limit');
 
 // Configure multer for profile picture uploads
 const storage = multer.diskStorage({
@@ -120,9 +120,6 @@ router.patch('/:userId', authMiddleware, async (req, res) => {
       { new: true, runValidators: true }
     ).select('-password');
 
-    // Update user in Elasticsearch
-    await elasticsearchService.indexUser(user);
-
     res.status(200).json({ user });
   } catch (err) {
     res.status(500).json({ 
@@ -143,9 +140,6 @@ router.delete('/:userId', authMiddleware, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    // Delete user from Elasticsearch
-    await elasticsearchService.deleteUser(req.params.userId);
 
     // Delete all user's photos
     await Photo.deleteMany({ userId: req.params.userId });
@@ -179,9 +173,6 @@ router.post('/signup', async (req, res) => {
 
         // Save user to database
         await user.save();
-
-        // Index user in Elasticsearch
-        await elasticsearchService.indexUser(user);
 
         // Create JWT token
         const token = jwt.sign(
