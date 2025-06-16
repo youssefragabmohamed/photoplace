@@ -449,19 +449,23 @@ router.post('/like/:photoId', authMiddleware, async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const alreadyLiked = photo.likes.includes(req.userId);
+    const existingLike = await Like.findOne({ 
+      photoId: photo._id,
+      userId: req.userId
+    });
     
-    if (alreadyLiked) {
-      photo.likes = photo.likes.filter(id => !id.equals(req.userId));
-      await photo.save();
+    if (existingLike) {
+      await Like.deleteOne({ _id: existingLike._id });
       return res.status(200).json({ 
         message: "Photo unliked", 
         isLiked: false,
-        likes: photo.likes.length
+        likes: await Like.countDocuments({ photoId: photo._id })
       });
     } else {
-      photo.likes.push(req.userId);
-      await photo.save();
+      await Like.create({
+        photoId: photo._id,
+        userId: req.userId
+      });
 
       // Create notification
       if (photo.userId._id.toString() !== req.userId) {
@@ -494,7 +498,7 @@ router.post('/like/:photoId', authMiddleware, async (req, res) => {
       return res.status(200).json({ 
         message: "Photo liked", 
         isLiked: true,
-        likes: photo.likes.length
+        likes: await Like.countDocuments({ photoId: photo._id })
       });
     }
   } catch (err) {
