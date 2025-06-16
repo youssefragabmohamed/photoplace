@@ -105,9 +105,7 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "https://*.onrender.com"],
       connectSrc: [
         "'self'",
-        ...allowedOrigins,
-        "https://*.bonsaisearch.net",
-        "https://*.bonsai.io"
+        ...allowedOrigins
       ],
       frameAncestors: ["'none'"],
       formAction: ["'self'"]
