@@ -9,6 +9,6 @@ services:
     startCommand: node server.js
     envVars:
       - key: MONGODB_URI
-        value: mongodb+srv://youssefragabmohamed:YOUSSEFRAGAB@photoplace.gtmxi.mongodb.net/photoplace?retryWrites=true&w=majority&appName=photoplace
+        value: mongodb+srv://youssefragab:YOUSSEFRAGAB@photoplace.gtmxi.mongodb.net/photoplace?retryWrites=true&w=majority&appName=photoplace
       - key: JWT_SECRET
         value: 5435d05e9d9d3da0de7d90fea03754f2
