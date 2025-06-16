@@ -8,7 +8,6 @@ const User = require('../models/user');
 const authMiddleware = require('../middleware/auth');
 const Notification = require('../models/notification');
 const rateLimit = require('express-rate-limit');
-const elasticsearchService = require('../services/elasticsearchService');
 const Like = require('../models/like');
 const Comment = require('../models/comment');
 const Save = require('../models/save');
@@ -211,9 +210,6 @@ router.post('/upload', authMiddleware, (req, res, next) => {
 
     const savedPhoto = await photo.save();
     console.log('Photo saved to database:', savedPhoto._id);
-
-    // Index the photo in Elasticsearch
-    await elasticsearchService.indexPhoto(savedPhoto);
 
     // Populate user data more carefully
     const populatedPhoto = await Photo.findById(savedPhoto._id)
@@ -520,9 +516,6 @@ router.delete('/:photoId', authMiddleware, async (req, res) => {
     if (!photo) {
       return res.status(404).json({ message: "Photo not found or unauthorized" });
     }
-
-    // Remove from Elasticsearch
-    await elasticsearchService.deletePhoto(photo._id);
 
     try {
       const filename = photo.url.split('/').pop();
