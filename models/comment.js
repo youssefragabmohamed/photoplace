@@ -23,10 +23,6 @@ const commentSchema = new mongoose.Schema({
   }
 });
 
-// Index for faster queries
-commentSchema.index({ photoId: 1, createdAt: -1 });
-commentSchema.index({ userId: 1, createdAt: -1 });
-
 const Comment = mongoose.model('Comment', commentSchema);
 
 module.exports = Comment; 
