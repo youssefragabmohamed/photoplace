@@ -591,8 +591,8 @@ router.get('/search', authMiddleware, async (req, res) => {
     const photosWithData = await Promise.all(photos.map(async (photo) => {
       const likes = await Like.countDocuments({ photoId: photo._id });
       const comments = await Comment.countDocuments({ photoId: photo._id });
-      const isLiked = await Like.exists({ photoId: photo._id, userId: req.user._id });
-      const isSaved = await Save.exists({ photoId: photo._id, userId: req.user._id });
+      const isLiked = await Like.exists({ photoId: photo._id, userId: req.userId });
+      const isSaved = await Save.exists({ photoId: photo._id, userId: req.userId });
 
       return {
         ...photo,
