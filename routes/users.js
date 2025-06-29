@@ -322,23 +322,26 @@ router.get('/search', authMiddleware, async (req, res) => {
       $text: { $search: sanitizedQuery }
     };
 
-    // Execute search with pagination
-    const users = await User.find(searchQuery)
-      .select('-password')
-      .sort({ score: { $meta: "textScore" } })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
+    // Execute search with pagination and caching
+    const [users, total] = await Promise.all([
+      User.find(searchQuery)
+        .select('-password')
+        .sort({ score: { $meta: "textScore" } })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean()
+        .cache(300), // Cache for 5 minutes
+      User.countDocuments(searchQuery).cache(300)
+    ]);
 
-    // Get total count for pagination
-    const total = await User.countDocuments(searchQuery);
-
-    // Get additional data for each user
+    // Get additional data for each user in parallel
     const usersWithData = await Promise.all(users.map(async (user) => {
-      const photoCount = await Photo.countDocuments({ userId: user._id });
-      const followerCount = await Follow.countDocuments({ followingId: user._id });
-      const followingCount = await Follow.countDocuments({ followerId: user._id });
-      const isFollowing = await Follow.exists({ followerId: req.user._id, followingId: user._id });
+      const [photoCount, followerCount, followingCount, isFollowing] = await Promise.all([
+        Photo.countDocuments({ userId: user._id }).cache(60),
+        Follow.countDocuments({ followingId: user._id }).cache(60),
+        Follow.countDocuments({ followerId: user._id }).cache(60),
+        Follow.exists({ followerId: req.userId, followingId: user._id }).cache(60)
+      ]);
 
       return {
         ...user,

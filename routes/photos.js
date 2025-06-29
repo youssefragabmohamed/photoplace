@@ -576,23 +576,26 @@ router.get('/search', authMiddleware, async (req, res) => {
       $text: { $search: sanitizedQuery }
     };
 
-    // Execute search with pagination
-    const photos = await Photo.find(searchQuery)
-      .sort({ score: { $meta: "textScore" } })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate('userId', 'username fullName profilePicture')
-      .lean();
+    // Execute search with pagination and caching
+    const [photos, total] = await Promise.all([
+      Photo.find(searchQuery)
+        .sort({ score: { $meta: "textScore" } })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .populate('userId', 'username fullName profilePicture')
+        .lean()
+        .cache(300), // Cache for 5 minutes
+      Photo.countDocuments(searchQuery).cache(300)
+    ]);
 
-    // Get total count for pagination
-    const total = await Photo.countDocuments(searchQuery);
-
-    // Get additional data for each photo
+    // Get additional data for each photo in parallel
     const photosWithData = await Promise.all(photos.map(async (photo) => {
-      const likes = await Like.countDocuments({ photoId: photo._id });
-      const comments = await Comment.countDocuments({ photoId: photo._id });
-      const isLiked = await Like.exists({ photoId: photo._id, userId: req.userId });
-      const isSaved = await Save.exists({ photoId: photo._id, userId: req.userId });
+      const [likes, comments, isLiked, isSaved] = await Promise.all([
+        Like.countDocuments({ photoId: photo._id }).cache(60),
+        Comment.countDocuments({ photoId: photo._id }).cache(60),
+        Like.exists({ photoId: photo._id, userId: req.userId }).cache(60),
+        Save.exists({ photoId: photo._id, userId: req.userId }).cache(60)
+      ]);
 
       return {
         ...photo,
