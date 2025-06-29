@@ -509,6 +509,66 @@ router.post('/like/:photoId', authMiddleware, async (req, res) => {
   }
 });
 
+// Search photos
+router.get('/search', authMiddleware, async (req, res) => {
+  try {
+    const { q, page = 1, limit = 12 } = req.query;
+    
+    if (!q) {
+      return res.status(400).json({ message: 'Search query is required' });
+    }
+
+    const sanitizedQuery = q.trim();
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Create text search query
+    const searchQuery = {
+      $text: { $search: sanitizedQuery }
+    };
+
+    // Execute search with pagination
+    const [photos, total] = await Promise.all([
+      Photo.find(searchQuery)
+        .sort({ score: { $meta: "textScore" } })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .populate('userId', 'username fullName profilePicture')
+        .lean(),
+      Photo.countDocuments(searchQuery)
+    ]);
+
+    // Get additional data for each photo in parallel
+    const photosWithData = await Promise.all(photos.map(async (photo) => {
+      const [likes, comments, isLiked, isSaved] = await Promise.all([
+        Like.countDocuments({ photoId: photo._id }),
+        Comment.countDocuments({ photoId: photo._id }),
+        Like.exists({ photoId: photo._id, userId: req.userId }),
+        Save.exists({ photoId: photo._id, userId: req.userId })
+      ]);
+
+      return {
+        ...photo,
+        likes,
+        comments,
+        isLiked: !!isLiked,
+        isSaved: !!isSaved
+      };
+    }));
+
+    res.json({
+      photos: photosWithData,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Search error:', error);
+    res.status(500).json({ message: 'Error searching photos' });
+  }
+});
+
 // Delete photo
 router.delete('/:photoId', authMiddleware, async (req, res) => {
   try {
@@ -556,67 +616,6 @@ router.get('/:photoId', authMiddleware, async (req, res) => {
       message: "Failed to fetch photo",
       error: err.message
     });
-  }
-});
-
-// Search photos
-router.get('/search', authMiddleware, async (req, res) => {
-  try {
-    const { q, page = 1, limit = 12 } = req.query;
-    
-    if (!q) {
-      return res.status(400).json({ message: 'Search query is required' });
-    }
-
-    const sanitizedQuery = q.trim();
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Create text search query
-    const searchQuery = {
-      $text: { $search: sanitizedQuery }
-    };
-
-    // Execute search with pagination and caching
-    const [photos, total] = await Promise.all([
-      Photo.find(searchQuery)
-        .sort({ score: { $meta: "textScore" } })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .populate('userId', 'username fullName profilePicture')
-        .lean()
-        .cache(300), // Cache for 5 minutes
-      Photo.countDocuments(searchQuery).cache(300)
-    ]);
-
-    // Get additional data for each photo in parallel
-    const photosWithData = await Promise.all(photos.map(async (photo) => {
-      const [likes, comments, isLiked, isSaved] = await Promise.all([
-        Like.countDocuments({ photoId: photo._id }).cache(60),
-        Comment.countDocuments({ photoId: photo._id }).cache(60),
-        Like.exists({ photoId: photo._id, userId: req.userId }).cache(60),
-        Save.exists({ photoId: photo._id, userId: req.userId }).cache(60)
-      ]);
-
-      return {
-        ...photo,
-        likes,
-        comments,
-        isLiked: !!isLiked,
-        isSaved: !!isSaved
-      };
-    }));
-
-    res.json({
-      photos: photosWithData,
-      pagination: {
-        total,
-        page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-  } catch (error) {
-    console.error('Search error:', error);
-    res.status(500).json({ message: 'Error searching photos' });
   }
 });
 
