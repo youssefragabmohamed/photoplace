@@ -129,6 +129,20 @@ router.patch('/:userId', authMiddleware, async (req, res) => {
   }
 });
 
+// Update user profile
+router.put('/:id', authMiddleware, async (req, res) => {
+  if (req.userId !== req.params.id) return res.status(403).json({ message: 'Forbidden' });
+  const { username, name, bio, website, profilePic } = req.body;
+  const update = {};
+  if (username) update.username = username;
+  if (name) update.name = name;
+  if (bio) update.bio = bio;
+  if (website) update.website = website;
+  if (profilePic) update.profilePic = profilePic;
+  const user = await User.findByIdAndUpdate(req.params.id, update, { new: true });
+  res.json(user);
+});
+
 // Delete profile
 router.delete('/:userId', authMiddleware, async (req, res) => {
   try {
@@ -363,6 +377,33 @@ router.get('/search', authMiddleware, async (req, res) => {
     console.error('Search error:', error);
     res.status(500).json({ message: 'Error searching users' });
   }
+});
+
+// Follow a user
+router.post('/:id/follow', authMiddleware, async (req, res) => {
+  if (req.userId === req.params.id) return res.status(400).json({ message: 'Cannot follow yourself' });
+  const exists = await Follow.findOne({ follower: req.userId, following: req.params.id });
+  if (exists) return res.status(400).json({ message: 'Already following' });
+  await new Follow({ follower: req.userId, following: req.params.id }).save();
+  res.json({ following: true });
+});
+
+// Unfollow a user
+router.delete('/:id/follow', authMiddleware, async (req, res) => {
+  await Follow.deleteOne({ follower: req.userId, following: req.params.id });
+  res.json({ following: false });
+});
+
+// Get followers
+router.get('/:id/followers', async (req, res) => {
+  const followers = await Follow.find({ following: req.params.id }).populate('follower', 'username profilePic');
+  res.json(followers.map(f => f.follower));
+});
+
+// Get following
+router.get('/:id/following', async (req, res) => {
+  const following = await Follow.find({ follower: req.userId }).populate('following', 'username profilePic');
+  res.json(following.map(f => f.following));
 });
 
 module.exports = router;

@@ -25,4 +25,4 @@ saveSchema.index({ photoId: 1, createdAt: -1 });
 
 const Save = mongoose.model('Save', saveSchema);
 
-module.exports = Save; 
+module.exports = mongoose.model('Save', saveSchema); 

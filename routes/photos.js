@@ -509,6 +509,42 @@ router.post('/like/:photoId', authMiddleware, async (req, res) => {
   }
 });
 
+// Like a photo
+router.post('/:id/like', authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.id);
+    if (!photo) return res.status(404).json({ message: 'Photo not found' });
+    const userId = req.userId;
+    if (photo.likes.includes(userId)) {
+      return res.status(400).json({ message: 'Already liked' });
+    }
+    photo.likes.push(userId);
+    photo.likeCount = photo.likes.length;
+    await photo.save();
+    res.json({ likeCount: photo.likeCount, liked: true });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to like photo', error: err.message });
+  }
+});
+
+// Unlike a photo
+router.delete('/:id/like', authMiddleware, async (req, res) => {
+  try {
+    const photo = await Photo.findById(req.params.id);
+    if (!photo) return res.status(404).json({ message: 'Photo not found' });
+    const userId = req.userId;
+    if (!photo.likes.includes(userId)) {
+      return res.status(400).json({ message: 'Not liked yet' });
+    }
+    photo.likes = photo.likes.filter(id => id.toString() !== userId);
+    photo.likeCount = photo.likes.length;
+    await photo.save();
+    res.json({ likeCount: photo.likeCount, liked: false });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to unlike photo', error: err.message });
+  }
+});
+
 // Search photos
 router.get('/search', authMiddleware, async (req, res) => {
   try {
@@ -617,6 +653,58 @@ router.get('/:photoId', authMiddleware, async (req, res) => {
       error: err.message
     });
   }
+});
+
+// Get comments for a photo
+router.get('/:id/comments', authMiddleware, async (req, res) => {
+  const comments = await Comment.find({ photoId: req.params.id })
+    .populate('userId', 'username profilePic')
+    .sort({ createdAt: 1 });
+  res.json(comments);
+});
+
+// Add a comment
+router.post('/:id/comments', authMiddleware, async (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ message: 'Text required' });
+  const comment = new Comment({
+    photoId: req.params.id,
+    userId: req.userId,
+    text
+  });
+  await comment.save();
+  await comment.populate('userId', 'username profilePic');
+  res.status(201).json(comment);
+});
+
+// Delete a comment
+router.delete('/comments/:commentId', authMiddleware, async (req, res) => {
+  const comment = await Comment.findById(req.params.commentId);
+  if (!comment) return res.status(404).json({ message: 'Not found' });
+  if (comment.userId.toString() !== req.userId) return res.status(403).json({ message: 'Forbidden' });
+  await comment.deleteOne();
+  res.json({ message: 'Deleted' });
+});
+
+// Save a photo
+router.post('/:id/save', authMiddleware, async (req, res) => {
+  const exists = await Save.findOne({ userId: req.userId, photoId: req.params.id });
+  if (exists) return res.status(400).json({ message: 'Already saved' });
+  const save = new Save({ userId: req.userId, photoId: req.params.id });
+  await save.save();
+  res.json({ saved: true });
+});
+
+// Unsave a photo
+router.delete('/:id/save', authMiddleware, async (req, res) => {
+  await Save.deleteOne({ userId: req.userId, photoId: req.params.id });
+  res.json({ saved: false });
+});
+
+// Get saved photos for user
+router.get('/saved', authMiddleware, async (req, res) => {
+  const saves = await Save.find({ userId: req.userId }).populate('photoId');
+  res.json({ photos: saves.map(s => s.photoId) });
 });
 
 module.exports = router; 
